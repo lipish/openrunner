@@ -4,7 +4,21 @@
 
 ## Agent 依赖安装
 
-根据需要安装对应的 CLI 工具：
+使用脚本一键安装所有 agent：
+
+```bash
+./scripts/install-agents.sh
+```
+
+或单独安装：
+
+```bash
+./scripts/install-agents.sh --claude-code  # 只安装 Claude Code
+./scripts/install-agents.sh --codex        # 只安装 Codex
+./scripts/install-agents.sh --opencode     # 只安装 OpenCode
+```
+
+手动安装：
 
 ```bash
 # Claude Code
@@ -17,6 +31,12 @@ npm install -g @openai/codex
 go install github.com/opencode-ai/opencode@latest
 # 或
 brew install opencode-ai/tap/opencode
+```
+
+检查 agent 可用状态：
+
+```bash
+curl http://localhost:3000/health/agents
 ```
 
 ## 特性

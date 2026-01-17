@@ -17,6 +17,7 @@ pub fn create_router() -> Router {
     Router::new()
         // 健康检查
         .route("/health", get(handlers::health))
+        .route("/health/agents", get(handlers::health_agents))
         // Agent 相关
         .route("/agents", get(handlers::list_agents))
         .route("/run", post(handlers::run_agent))           // 流式

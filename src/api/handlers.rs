@@ -113,5 +113,45 @@ pub async fn list_agents() -> impl IntoResponse {
     }))
 }
 
+/// 检查各 Agent 的可用状态
+pub async fn health_agents() -> impl IntoResponse {
+    use crate::agent::{ClaudeCodeAgent, CodexAgent, OpenCodeAgent};
+    use crate::types::AgentConfig;
+    
+    let config = AgentConfig::default();
+    
+    let claude = ClaudeCodeAgent::new(config.clone());
+    let codex = CodexAgent::new(config.clone());
+    let opencode = OpenCodeAgent::new(config.clone());
+    
+    // 并发检查所有 agent
+    let (claude_ok, codex_ok, opencode_ok) = tokio::join!(
+        claude.health_check(),
+        codex.health_check(),
+        opencode.health_check()
+    );
+    
+    Json(serde_json::json!({
+        "agents": {
+            "claude_code": {
+                "available": claude_ok.is_ok(),
+                "error": claude_ok.err().map(|e| e.to_string()),
+                "install": "npm install -g @anthropic-ai/claude-code"
+            },
+            "codex": {
+                "available": codex_ok.is_ok(),
+                "error": codex_ok.err().map(|e| e.to_string()),
+                "install": "npm install -g @openai/codex"
+            },
+            "opencode": {
+                "available": opencode_ok.is_ok(),
+                "error": opencode_ok.err().map(|e| e.to_string()),
+                "install": "go install github.com/opencode-ai/opencode@latest"
+            }
+        }
+    }))
+}
+
 // 需要引入 StreamExt
 use futures::StreamExt;
+use crate::agent::Agent;

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// 流式输出事件
+/// 流式输出事件（内部使用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamEvent {
@@ -17,6 +17,7 @@ pub enum StreamEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     /// Agent 类型: claude_code, codex, opencode
+    #[serde(default = "default_agent_type")]
     pub agent_type: String,
     /// 工作目录
     #[serde(default)]
@@ -27,6 +28,13 @@ pub struct AgentConfig {
     /// 额外参数
     #[serde(default)]
     pub extra_args: Vec<String>,
+    /// 模型（可选）
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+fn default_agent_type() -> String {
+    "claude_code".to_string()
 }
 
 fn default_timeout() -> u64 {
@@ -36,15 +44,93 @@ fn default_timeout() -> u64 {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            agent_type: "claude_code".to_string(),
+            agent_type: default_agent_type(),
             working_dir: None,
             timeout_secs: default_timeout(),
             extra_args: vec![],
+            model: None,
         }
     }
 }
 
-/// API 请求体
+// ============ API 请求/响应类型 ============
+
+/// 附件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attachment {
+    pub name: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+}
+
+/// Run 输入
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunInput {
+    pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+}
+
+/// Run 元数据
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RunMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+}
+
+/// POST /api/runs 请求
+#[derive(Debug, Deserialize)]
+pub struct CreateRunRequest {
+    pub input: RunInput,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub metadata: RunMetadata,
+}
+
+/// POST /api/runs 响应
+#[derive(Debug, Serialize)]
+pub struct CreateRunResponse {
+    pub run_id: String,
+}
+
+/// POST /api/chat 请求
+#[derive(Debug, Deserialize)]
+pub struct ChatRequest {
+    pub message: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+}
+
+/// POST /api/chat 响应
+#[derive(Debug, Serialize)]
+pub struct ChatResponse {
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
+
+/// 错误响应
+#[derive(Debug, Serialize)]
+pub struct ErrorResponse {
+    pub error: String,
+}
+
+// ============ 旧的类型（保持兼容）============
+
+/// API 请求体（旧接口）
 #[derive(Debug, Deserialize)]
 pub struct RunRequest {
     pub prompt: String,
@@ -52,7 +138,7 @@ pub struct RunRequest {
     pub config: AgentConfig,
 }
 
-/// API 响应体
+/// API 响应体（旧接口）
 #[derive(Debug, Serialize)]
 pub struct RunResponse {
     pub session_id: Uuid,

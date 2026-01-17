@@ -5,10 +5,37 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use crate::run::{RunStore, RunManager};
 use super::handlers;
+
+/// 应用状态
+#[derive(Clone)]
+pub struct AppState {
+    pub run_manager: RunManager,
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        let store = RunStore::new();
+        let run_manager = RunManager::new(store);
+        Self { run_manager }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// 创建 API 路由
 pub fn create_router() -> Router {
+    let state = AppState::new();
+    create_router_with_state(state)
+}
+
+/// 使用指定状态创建路由
+pub fn create_router_with_state(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -18,10 +45,23 @@ pub fn create_router() -> Router {
         // 健康检查
         .route("/health", get(handlers::health))
         .route("/health/agents", get(handlers::health_agents))
-        // Agent 相关
+        
+        // Agent 列表
         .route("/agents", get(handlers::list_agents))
-        .route("/run", post(handlers::run_agent))           // 流式
-        .route("/run/sync", post(handlers::run_agent_sync)) // 同步
+        
+        // Auth API
+        .route("/api/auth/login", post(handlers::login))
+        
+        // Runs API
+        .route("/api/runs", post(handlers::create_run))
+        .route("/api/runs/{run_id}/events", get(handlers::run_events))
+        
+        // Chat API (fallback)
+        .route("/api/chat", post(handlers::chat))
+        
+        // 状态
+        .with_state(state)
+        
         // 中间件
         .layer(TraceLayer::new_for_http())
         .layer(cors)

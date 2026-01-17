@@ -16,15 +16,22 @@ async fn main() -> Result<()> {
     let app = openrunner::create_router();
 
     // 绑定地址
-    let addr = std::env::var("OPENRUNNER_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
+    let addr = std::env::var("OPENRUNNER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    
+
     tracing::info!("OpenRunner listening on {}", addr);
+    tracing::info!("");
     tracing::info!("API endpoints:");
-    tracing::info!("  GET  /health     - Health check");
-    tracing::info!("  GET  /agents     - List available agents");
-    tracing::info!("  POST /run        - Run agent (SSE streaming)");
-    tracing::info!("  POST /run/sync   - Run agent (wait for completion)");
+    tracing::info!("  GET  /health              - Health check");
+    tracing::info!("  GET  /health/agents       - Check agent availability");
+    tracing::info!("  GET  /agents              - List available agents");
+    tracing::info!("");
+    tracing::info!("  POST /api/auth/login      - Login (username/password)");
+    tracing::info!("  POST /api/runs            - Create a run");
+    tracing::info!("  GET  /api/runs/:id/events - Stream run events (SSE)");
+    tracing::info!("  POST /api/chat            - Non-streaming chat (fallback)");
+    tracing::info!("");
+    tracing::info!("Default users: admin/admin, user/user");
 
     // 启动服务
     axum::serve(listener, app).await?;

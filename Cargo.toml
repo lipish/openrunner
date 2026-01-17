@@ -39,5 +39,14 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Process execution for CLI agents
 async-process = "2"
 
+# JWT authentication
+jsonwebtoken = "9"
+
+# Concurrent HashMap for run storage
+dashmap = "6"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
 [dev-dependencies]
 tokio-test = "0.4"

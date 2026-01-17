@@ -63,46 +63,67 @@ OPENRUNNER_ADDR=0.0.0.0:8080 cargo run
 
 ### 健康检查
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:8080/health
 ```
 
-### 列出可用 Agent
+### 检查 Agent 可用性
 ```bash
-curl http://localhost:3000/agents
+curl http://localhost:8080/health/agents
 ```
 
-### 流式执行（SSE）
+### 登录获取 Token
 ```bash
-curl -N -X POST http://localhost:3000/run \
+curl -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "帮我写一个 hello world",
-    "config": {
-      "agent_type": "claude_code",
-      "working_dir": "/tmp/test"
-    }
-  }'
+  -d '{"username": "admin", "password": "admin"}'
 ```
 
-### 同步执行
+默认用户：`admin/admin`, `user/user`
+
+### 创建 Run（流式）
 ```bash
-curl -X POST http://localhost:3000/run/sync \
+# 1. 创建 run
+curl -X POST http://localhost:8080/api/runs \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{
-    "prompt": "帮我写一个 hello world",
-    "config": {
-      "agent_type": "claude_code"
-    }
+    "input": {"text": "create hello.py"},
+    "metadata": {"agent_type": "claude_code", "cwd": "/tmp/test"}
   }'
+
+# 返回: {"run_id": "run_abc123"}
+
+# 2. 订阅事件流 (SSE)
+curl -N "http://localhost:8080/api/runs/run_abc123/events?access_token=<token>"
 ```
+
+### 非流式聊天（降级方案）
+```bash
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"message": "hello", "model": "claude"}'
+```
+
+## API 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/health` | GET | 健康检查 |
+| `/health/agents` | GET | 检查 agent 可用性 |
+| `/api/auth/login` | POST | 登录获取 token |
+| `/api/runs` | POST | 创建 run |
+| `/api/runs/:id/events` | GET | SSE 事件流 |
+| `/api/chat` | POST | 非流式聊天 |
 
 ## 配置选项
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | agent_type | string | claude_code | Agent 类型 |
-| working_dir | string | null | 工作目录 |
+| working_dir / cwd | string | null | 工作目录 |
 | timeout_secs | number | 300 | 超时时间（秒）|
+| model | string | null | 模型名称 |
 | extra_args | array | [] | 额外命令行参数 |
 
 ## 架构
@@ -118,6 +139,13 @@ src/
 ├── api/             # HTTP API
 │   ├── handlers.rs  # 请求处理
 │   └── router.rs    # 路由配置
+├── auth/            # JWT 认证
+│   ├── mod.rs
+│   └── jwt.rs
+├── run/             # Run 管理
+│   ├── store.rs     # 状态存储
+│   ├── events.rs    # SSE 事件类型
+│   └── manager.rs   # Run 生命周期管理
 ├── types.rs         # 公共类型
 ├── lib.rs
 └── main.rs

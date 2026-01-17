@@ -37,19 +37,24 @@ impl Agent for ClaudeCodeAgent {
     async fn run(&self, prompt: String, tx: mpsc::Sender<StreamEvent>) -> Result<()> {
         let mut cmd = tokio::process::Command::new("claude");
         
-        // 基础参数
-        cmd.arg("--print");  // 非交互模式
-        cmd.arg("--prompt").arg(&prompt);
+        // -p/--print: 非交互模式，输出后退出
+        // --dangerously-skip-permissions: 跳过权限检查（适合自动化）
+        cmd.arg("-p");
+        cmd.arg("--dangerously-skip-permissions");
         
         // 工作目录
         if let Some(ref dir) = self.config.working_dir {
             cmd.current_dir(dir);
+            cmd.arg("--add-dir").arg(dir);
         }
         
-        // 额外参数
+        // 额外参数（如 --model, --output-format 等）
         for arg in &self.config.extra_args {
             cmd.arg(arg);
         }
+        
+        // prompt 作为位置参数
+        cmd.arg(&prompt);
         
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

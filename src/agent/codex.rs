@@ -40,24 +40,26 @@ impl Agent for CodexAgent {
     async fn run(&self, prompt: String, tx: mpsc::Sender<StreamEvent>) -> Result<()> {
         let mut cmd = tokio::process::Command::new("codex");
         
-        // Codex CLI 参数
-        // --quiet: 减少冗余输出
-        // --approval-mode full-auto: 自动批准所有操作（非交互）
-        cmd.arg("--quiet");
-        cmd.arg("--approval-mode").arg("full-auto");
+        // 使用 exec 子命令进行非交互执行
+        cmd.arg("exec");
         
-        // 额外参数（用户可通过 extra_args 传入如 --model, --json 等）
+        // --full-auto: 自动批准所有操作，workspace-write 沙箱
+        // --skip-git-repo-check: 允许在非 git 目录运行
+        cmd.arg("--full-auto");
+        cmd.arg("--skip-git-repo-check");
+        
+        // 工作目录
+        if let Some(ref dir) = self.config.working_dir {
+            cmd.arg("-C").arg(dir);
+        }
+        
+        // 额外参数（用户可通过 extra_args 传入如 --model 等）
         for arg in &self.config.extra_args {
             cmd.arg(arg);
         }
         
         // prompt 作为最后一个位置参数
         cmd.arg(&prompt);
-        
-        // 工作目录
-        if let Some(ref dir) = self.config.working_dir {
-            cmd.current_dir(dir);
-        }
         
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

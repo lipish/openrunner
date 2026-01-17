@@ -1,0 +1,43 @@
+[package]
+name = "openrunner"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight agent execution environment"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Async trait support
+async-trait = "0.1"
+
+# HTTP server
+axum = { version = "0.7", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Streaming
+tokio-stream = "0.1"
+futures = "0.3"
+
+# UUID for request/session IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Process execution for CLI agents
+async-process = "2"
+
+[dev-dependencies]
+tokio-test = "0.4"

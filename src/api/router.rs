@@ -54,7 +54,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         
         // Runs API
         .route("/api/runs", post(handlers::create_run))
-        .route("/api/runs/{run_id}/events", get(handlers::run_events))
+        .route("/api/runs/:run_id/events", get(handlers::run_events))
         
         // Chat API (fallback)
         .route("/api/chat", post(handlers::chat))

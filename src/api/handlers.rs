@@ -6,7 +6,6 @@ use axum::{
     },
     http::StatusCode,
 };
-use futures::stream::Stream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use std::convert::Infallible;
@@ -17,7 +16,7 @@ use crate::types::{
     CreateRunRequest, CreateRunResponse, ChatRequest, ChatResponse,
     ErrorResponse, AgentConfig,
 };
-use crate::agent::{create_agent, AgentHandle, ClaudeCodeAgent, CodexAgent, OpenCodeAgent, Agent};
+use crate::agent::{create_agent, AgentHandle, ClaudeCodeAgent, CodexAgent, OpenCodeAgent, MockAgent, Agent};
 
 use super::AppState;
 
@@ -64,15 +63,22 @@ pub async fn health_agents() -> impl IntoResponse {
     let claude = ClaudeCodeAgent::new(config.clone());
     let codex = CodexAgent::new(config.clone());
     let opencode = OpenCodeAgent::new(config.clone());
+    let mock = MockAgent::new(config.clone());
 
-    let (claude_ok, codex_ok, opencode_ok) = tokio::join!(
+    let (claude_ok, codex_ok, opencode_ok, mock_ok) = tokio::join!(
         claude.health_check(),
         codex.health_check(),
-        opencode.health_check()
+        opencode.health_check(),
+        mock.health_check()
     );
 
     Json(serde_json::json!({
         "agents": {
+            "mock": {
+                "available": mock_ok.is_ok(),
+                "error": mock_ok.err().map(|e| e.to_string()),
+                "description": "Mock agent for testing (no API key required)"
+            },
             "claude_code": {
                 "available": claude_ok.is_ok(),
                 "error": claude_ok.err().map(|e| e.to_string()),
@@ -96,6 +102,7 @@ pub async fn health_agents() -> impl IntoResponse {
 pub async fn list_agents() -> impl IntoResponse {
     Json(serde_json::json!({
         "agents": [
+            {"type": "mock", "description": "Mock agent for testing (no API key required)"},
             {"type": "claude_code", "description": "Claude Code CLI agent"},
             {"type": "codex", "description": "OpenAI Codex CLI agent"},
             {"type": "opencode", "description": "OpenCode CLI agent"}
@@ -119,9 +126,9 @@ pub async fn create_run(
         &req.input.text,
     );
 
-    // 构建 AgentConfig
+    // 构建 AgentConfig (默认使用 mock agent 便于测试)
     let config = AgentConfig {
-        agent_type: req.metadata.agent_type.unwrap_or_else(|| "claude_code".to_string()),
+        agent_type: req.metadata.agent_type.unwrap_or_else(|| "mock".to_string()),
         working_dir: req.metadata.cwd,
         model: req.metadata.model,
         ..Default::default()
@@ -143,12 +150,21 @@ pub struct EventsQuery {
     pub access_token: Option<String>,
 }
 
+/// 将 RunEvent 转换为 SSE Event
+fn run_event_to_sse(event: crate::run::RunEvent) -> Result<Event, Infallible> {
+    let event_type = event.event_type();
+    let data = event.event_data().to_string();
+    Ok(Event::default().event(event_type).data(data))
+}
+
 /// GET /api/runs/:run_id/events - 订阅 Run 事件 (SSE)
 pub async fn run_events(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
     Query(query): Query<EventsQuery>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Sse<std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>>>, (StatusCode, Json<ErrorResponse>)> {
+    use crate::run::{RunStatus, RunEvent, RunCompleted, RunFailed, CompletedMessage};
+    
     // 验证 token（可选）
     if let Some(token) = &query.access_token {
         if verify_token(token).is_err() {
@@ -158,7 +174,39 @@ pub async fn run_events(
         }
     }
 
-    // 订阅事件
+    // 获取 run 信息
+    let run = state.run_manager.get_run(&run_id)
+        .ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(ErrorResponse {
+                error: format!("Run not found: {}", run_id),
+            }))
+        })?;
+
+    // 如果已完成，返回历史结果
+    if run.status == RunStatus::Completed {
+        let events = vec![RunEvent::RunCompleted(RunCompleted {
+            message: CompletedMessage {
+                role: "assistant".to_string(),
+                content: run.output.clone(),
+                timestamp: run.updated_at,
+            },
+        })];
+        let stream: std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>> = 
+            Box::pin(futures::stream::iter(events).map(run_event_to_sse));
+        return Ok(Sse::new(stream));
+    }
+
+    // 如果失败，返回错误
+    if run.status == RunStatus::Failed {
+        let events = vec![RunEvent::RunFailed(RunFailed {
+            error: run.error.unwrap_or_else(|| "Unknown error".to_string()),
+        })];
+        let stream: std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>> = 
+            Box::pin(futures::stream::iter(events).map(run_event_to_sse));
+        return Ok(Sse::new(stream));
+    }
+
+    // 订阅新事件
     let rx = state.run_manager.subscribe(&run_id)
         .ok_or_else(|| {
             (StatusCode::NOT_FOUND, Json(ErrorResponse {
@@ -167,11 +215,8 @@ pub async fn run_events(
         })?;
 
     // 转换为 SSE 流
-    let stream = ReceiverStream::new(rx).map(|event| {
-        let event_type = event.event_type();
-        let data = event.event_data().to_string();
-        Ok(Event::default().event(event_type).data(data))
-    });
+    let stream: std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>> = 
+        Box::pin(ReceiverStream::new(rx).map(run_event_to_sse));
 
     Ok(Sse::new(stream))
 }

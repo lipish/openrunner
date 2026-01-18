@@ -56,57 +56,57 @@ impl RunManager {
 
         // 启动事件转发任务
         tokio::spawn(async move {
-            // 启动 agent 执行
-            let _run_task = handle.run(prompt);
+            // 在单独的 task 中启动 agent 执行
+            let run_task = tokio::spawn(async move {
+                handle.run(prompt).await
+            });
 
-            // 并发处理：执行 agent 和转发事件
+            // 并发处理：转发事件
             let mut output = String::new();
             
             loop {
-                tokio::select! {
-                    // 接收 agent 事件
-                    event = agent_rx.recv() => {
-                        match event {
-                            Some(StreamEvent::Token { content }) => {
-                                output.push_str(&content);
-                                store.append_output(&rid, &content);
-                                
-                                // 转发给订阅者
-                                if let Some(tx) = store.get_event_tx(&rid) {
-                                    let _ = tx.send(RunEvent::MessageDelta(MessageDelta {
-                                        delta: content,
-                                    })).await;
-                                }
-                            }
-                            Some(StreamEvent::Done { .. }) => {
-                                store.update_status(&rid, RunStatus::Completed);
-                                
-                                if let Some(tx) = store.get_event_tx(&rid) {
-                                    let _ = tx.send(RunEvent::RunCompleted(RunCompleted {
-                                        message: CompletedMessage {
-                                            role: "assistant".to_string(),
-                                            content: output.clone(),
-                                            timestamp: Utc::now(),
-                                        },
-                                    })).await;
-                                }
-                                break;
-                            }
-                            Some(StreamEvent::Error { message }) => {
-                                store.set_error(&rid, message.clone());
-                                
-                                if let Some(tx) = store.get_event_tx(&rid) {
-                                    let _ = tx.send(RunEvent::RunFailed(RunFailed {
-                                        error: message,
-                                    })).await;
-                                }
-                                break;
-                            }
-                            None => break,
+                match agent_rx.recv().await {
+                    Some(StreamEvent::Token { content }) => {
+                        output.push_str(&content);
+                        store.append_output(&rid, &content);
+                        
+                        // 转发给订阅者
+                        if let Some(tx) = store.get_event_tx(&rid) {
+                            let _ = tx.send(RunEvent::MessageDelta(MessageDelta {
+                                delta: content,
+                            })).await;
                         }
                     }
+                    Some(StreamEvent::Done { .. }) => {
+                        store.update_status(&rid, RunStatus::Completed);
+                        
+                        if let Some(tx) = store.get_event_tx(&rid) {
+                            let _ = tx.send(RunEvent::RunCompleted(RunCompleted {
+                                message: CompletedMessage {
+                                    role: "assistant".to_string(),
+                                    content: output.clone(),
+                                    timestamp: Utc::now(),
+                                },
+                            })).await;
+                        }
+                        break;
+                    }
+                    Some(StreamEvent::Error { message }) => {
+                        store.set_error(&rid, message.clone());
+                        
+                        if let Some(tx) = store.get_event_tx(&rid) {
+                            let _ = tx.send(RunEvent::RunFailed(RunFailed {
+                                error: message,
+                            })).await;
+                        }
+                        break;
+                    }
+                    None => break,
                 }
             }
+            
+            // 等待 agent 任务完成
+            let _ = run_task.await;
         });
 
         Ok(())

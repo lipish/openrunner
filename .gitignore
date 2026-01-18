@@ -15,3 +15,9 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Web frontend (temporary, will move to separate repo)
+web/node_modules/
+web/dist/
+web/.env
+web/.env.local

@@ -1,0 +1,297 @@
+openapi: 3.0.3
+info:
+  title: run-agent Backend API
+  version: 0.3.0
+  description: Backend contract consumed by the run-agent React/Vite web UI.
+servers:
+  - url: https://example.com
+    description: Production
+  - url: http://127.0.0.1:8080
+    description: Local
+
+tags:
+  - name: auth
+  - name: runs
+  - name: chat
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+
+    LoginResponse:
+      type: object
+      required: [access_token]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 3600
+        refresh_token:
+          type: string
+          nullable: true
+        user:
+          $ref: '#/components/schemas/User'
+
+    Attachment:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        size:
+          type: integer
+
+    RunCreateRequest:
+      type: object
+      properties:
+        input:
+          type: object
+          properties:
+            text:
+              type: string
+            attachments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Attachment'
+        session_id:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+
+    RunCreateResponse:
+      type: object
+      required: [run_id]
+      properties:
+        run_id:
+          type: string
+
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        model:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+
+    ChatResponse:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [assistant]
+        content:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    SSEMessageDelta:
+      type: object
+      properties:
+        delta:
+          type: string
+
+    SSECompleted:
+      type: object
+      properties:
+        message:
+          type: object
+          properties:
+            role:
+              type: string
+              enum: [assistant]
+            content:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+
+    SSEFailed:
+      type: object
+      properties:
+        error:
+          type: string
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Login (username/password)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/runs:
+    post:
+      tags: [runs]
+      summary: Create a run (recommended)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCreateRequest'
+      responses:
+        '200':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunCreateResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Not supported (frontend may fallback to /api/chat)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: Not implemented (frontend may fallback to /api/chat)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/runs/{run_id}/events:
+    get:
+      tags: [runs]
+      summary: Stream run events (SSE)
+      description: |
+        Server-Sent Events endpoint.
+        Authentication MUST be provided via query param `access_token`, because EventSource cannot set custom headers.
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: access_token
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                message_delta:
+                  value: |
+                    event: message_delta
+                    data: {"delta":"hello"}
+
+                run_completed:
+                  value: |
+                    event: run_completed
+                    data: {"message":{"role":"assistant","content":"done","timestamp":"2026-01-01T00:00:00Z"}}
+
+                run_failed:
+                  value: |
+                    event: run_failed
+                    data: {"error":"failed"}
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/chat:
+    post:
+      tags: [chat]
+      summary: Non-streaming fallback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

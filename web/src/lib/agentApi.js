@@ -35,11 +35,11 @@ export async function loginWithPassword({ username, password }) {
 }
 
 export async function chatOnce(message, opts = {}) {
-  const { model, attachments } = opts;
+  const { model, attachments, agentType, env } = opts;
   const res = await fetch(apiUrl('/api/chat'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ message, model, attachments })
+    body: JSON.stringify({ message, model, attachments, agent_type: agentType, env })
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();

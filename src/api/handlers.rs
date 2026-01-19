@@ -244,8 +244,9 @@ pub async fn chat(
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, (StatusCode, Json<ErrorResponse>)> {
     let config = AgentConfig {
-        agent_type: "claude_code".to_string(),
+        agent_type: req.agent_type.unwrap_or_else(|| "claude_code".to_string()),
         model: req.model,
+        env: req.env.unwrap_or_default(),
         ..Default::default()
     };
 

@@ -117,6 +117,10 @@ pub struct ChatRequest {
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
+    pub agent_type: Option<String>,
+    #[serde(default)]
+    pub env: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
     pub attachments: Vec<Attachment>,
 }
 

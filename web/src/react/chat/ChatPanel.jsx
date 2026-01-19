@@ -399,7 +399,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
                         placeholder="Search agent…"
                         style={{ width: '100%', padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13 }}
                       />
-                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflow: 'auto' }}>
+                      <div className="ra-agent-scroll" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflow: 'auto' }}>
                         {filteredAgents.map((a) => (
                           <button
                             key={a.id}

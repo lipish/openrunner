@@ -46,14 +46,14 @@ export async function chatOnce(message, opts = {}) {
 }
 
 export async function createRun(message, sessionId, opts = {}) {
-  const { model, attachments } = opts;
+  const { model, attachments, agentType, env } = opts;
   const res = await fetch(apiUrl('/api/runs'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
       input: { text: message, attachments },
       session_id: sessionId || null,
-      metadata: { client: 'web', model }
+      metadata: { client: 'web', model, agent_type: agentType, env }
     })
   });
 
@@ -95,8 +95,8 @@ export function streamRun(runId, { onDelta, onCompleted, onError }) {
   return () => es.close();
 }
 
-export async function sendMessage({ message, sessionId, onDelta, model, attachments }) {
-  const opts = { model, attachments };
+export async function sendMessage({ message, sessionId, onDelta, model, attachments, agentType, env }) {
+  const opts = { model, attachments, agentType, env };
 
   try {
     const { run_id } = await createRun(message, sessionId, opts);

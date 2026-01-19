@@ -31,6 +31,9 @@ pub struct AgentConfig {
     /// 模型（可选）
     #[serde(default)]
     pub model: Option<String>,
+    /// 环境变量（可选）
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
 }
 
 fn default_agent_type() -> String {
@@ -49,6 +52,7 @@ impl Default for AgentConfig {
             timeout_secs: default_timeout(),
             extra_args: vec![],
             model: None,
+            env: std::collections::HashMap::new(),
         }
     }
 }
@@ -86,6 +90,8 @@ pub struct RunMetadata {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<std::collections::HashMap<String, String>>,
 }
 
 /// POST /api/runs 请求

@@ -1,51 +1,223 @@
-import React, { useState } from 'react';
-import { LogOut, Plus, Settings, X } from 'lucide-react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
+import { ChevronDown, LogOut, Plus, Settings, Trash2, User } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ChatPanel from '../chat/ChatPanel.jsx';
 import SettingsModal from './SettingsModal.jsx';
 
+const AGENT_LABELS = {
+  claude_code: 'Claude Code',
+  codex: 'Codex',
+  droid: 'Droid',
+  opencode: 'OpenCode',
+  kimi_cli: 'Kimi-Cli',
+  augment: 'Augment',
+  amp: 'AMP',
+  mock: 'Mock',
+};
+
+function agentLabel(id) {
+  return AGENT_LABELS[id] || id || 'Agent';
+}
+
 function newSession() {
   const id = `s_${Math.random().toString(16).slice(2)}`;
-  return { id, title: 'New Agent', messages: [] };
+  return { id, title: 'New Agent', messages: [], agent_type: 'claude_code', model: '', env: {} };
+}
+
+function agentReducer(state, action) {
+  switch (action.type) {
+    case 'ADD': {
+      return { ...state, sessions: [newSession(), ...state.sessions] };
+    }
+    case 'HIDE': {
+      const s = state.sessions.find((x) => x.id === action.id);
+      if (!s) return state;
+      const nextSessions = state.sessions.filter((x) => x.id !== action.id);
+      const sessions = nextSessions.length ? nextSessions : [newSession()];
+      if (state.hiddenSessions.some((x) => x.id === action.id)) return { ...state, sessions };
+      return { ...state, sessions, hiddenSessions: [s, ...state.hiddenSessions] };
+    }
+    case 'RESTORE': {
+      const s = state.hiddenSessions.find((x) => x.id === action.id);
+      if (!s) return state;
+      if (state.sessions.some((x) => x.id === action.id)) {
+        return { ...state, hiddenSessions: state.hiddenSessions.filter((x) => x.id !== action.id) };
+      }
+      return {
+        ...state,
+        sessions: [s, ...state.sessions],
+        hiddenSessions: state.hiddenSessions.filter((x) => x.id !== action.id),
+      };
+    }
+    case 'CLOSE_HIDDEN': {
+      return { ...state, hiddenSessions: state.hiddenSessions.filter((x) => x.id !== action.id) };
+    }
+    case 'UPDATE_SESSION': {
+      return {
+        ...state,
+        sessions: state.sessions.map((s) => (s.id === action.id ? action.updater(s) : s)),
+      };
+    }
+    default:
+      return state;
+  }
 }
 
 export default function Shell() {
   const { logout } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [sessions, setSessions] = useState(() => [newSession()]);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+  const [agentState, dispatch] = useReducer(agentReducer, null, () => ({
+    sessions: [newSession(), newSession(), newSession()],
+    hiddenSessions: [],
+  }));
+
+  const sessions = agentState.sessions;
+  const hiddenSessions = agentState.hiddenSessions;
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    const onMouseDown = (e) => {
+      if (!userMenuRef.current) return;
+      if (userMenuRef.current.contains(e.target)) return;
+      setUserMenuOpen(false);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setUserMenuOpen(false);
+    };
+
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [userMenuOpen]);
 
   function addSession() {
-    const s = newSession();
-    setSessions((prev) => [s, ...prev]);
+    dispatch({ type: 'ADD' });
   }
 
-  function removeSession(id) {
-    setSessions((prev) => {
-      const next = prev.filter((s) => s.id !== id);
-      return next.length ? next : [newSession()];
-    });
+  function hideSession(id) {
+    dispatch({ type: 'HIDE', id });
+  }
+
+  function restoreSession(id) {
+    dispatch({ type: 'RESTORE', id });
+  }
+
+  function closeHiddenSession(id) {
+    dispatch({ type: 'CLOSE_HIDDEN', id });
   }
 
   function updateSession(id, updater) {
-    setSessions((prev) => prev.map((s) => (s.id === id ? updater(s) : s)));
+    dispatch({ type: 'UPDATE_SESSION', id, updater });
   }
 
   return (
     <>
       <div className="ra-topbar">
-        <div style={{ fontWeight: 800 }}>run-agent</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button className="ra-icon-btn" onClick={addSession} title="New Agent">
+        <div className="ra-brand">OpenRunner</div>
+        <div className="ra-topbar-actions" aria-label="Actions">
+          <button className="ra-primary-btn" onClick={addSession} title="New Agent" aria-label="New Agent">
             <Plus size={16} />
+            <span style={{ fontSize: 12, fontWeight: 700 }}>New Agent</span>
           </button>
-          <button className="ra-icon-btn" onClick={() => setSettingsOpen(true)} title="Settings">
-            <Settings size={16} />
-          </button>
-          <button className="ra-icon-btn" onClick={logout} title="Logout">
-            <LogOut size={16} />
-          </button>
+
+          <div className="ra-user-menu" ref={userMenuRef}>
+            <button
+              className="ra-action-btn"
+              onClick={() => setUserMenuOpen((v) => !v)}
+              title="Account"
+              aria-label="Account"
+              aria-expanded={userMenuOpen}
+            >
+              <User size={16} />
+              <ChevronDown size={14} />
+            </button>
+
+            {userMenuOpen ? (
+              <div className="ra-menu" role="menu">
+                {hiddenSessions.length ? (
+                  <>
+                    <div className="ra-menu-label">Hidden agents</div>
+                    {hiddenSessions.slice(0, 8).map((s) => (
+                      <button
+                        key={s.id}
+                        className="ra-menu-item"
+                        role="menuitem"
+                        onClick={() => {
+                          restoreSession(s.id);
+                          setUserMenuOpen(false);
+                        }}
+                      >
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+                        <span className="ra-menu-hint">Restore</span>
+                      </button>
+                    ))}
+                    <div className="ra-menu-sep" />
+                  </>
+                ) : null}
+
+                <button
+                  className="ra-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    setSettingsOpen(true);
+                  }}
+                >
+                  <Settings size={16} />
+                  Settings
+                </button>
+                <button
+                  className="ra-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    logout();
+                  }}
+                >
+                  <LogOut size={16} />
+                  Logout
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
+
+      {hiddenSessions.length ? (
+        <div className="ra-hidden-bar" aria-label="Hidden agents">
+          <div className="ra-hidden-label">Hidden</div>
+          <div className="ra-hidden-list">
+            {hiddenSessions.slice(0, 12).map((s) => (
+              <div key={s.id} className="ra-hidden-pill" title={`Restore: ${s.title} (${agentLabel(s.agent_type)})`}>
+                <button
+                  type="button"
+                  className="ra-hidden-pill-main"
+                  onClick={() => restoreSession(s.id)}
+                  aria-label={`Restore: ${s.title} (${agentLabel(s.agent_type)})`}
+                >
+                  {s.title} · {agentLabel(s.agent_type)}
+                </button>
+                <button
+                  type="button"
+                  className="ra-hidden-pill-close"
+                  onClick={() => closeHiddenSession(s.id)}
+                  title="Close permanently"
+                  aria-label="Close permanently"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="ra-grid">
         {sessions.map((s) => (
@@ -53,10 +225,9 @@ export default function Shell() {
             <div className="ra-card-header">
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</div>
-                <div style={{ fontSize: 11, color: '#666' }}>{s.id}</div>
               </div>
-              <button className="ra-icon-btn" onClick={() => removeSession(s.id)} title="Close">
-                <X size={16} />
+              <button className="ra-close-btn" onClick={() => hideSession(s.id)} title="Hide" aria-label="Hide">
+                <ChevronDown size={16} />
               </button>
             </div>
 

@@ -11,7 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use std::convert::Infallible;
 use serde::Deserialize;
 
-use crate::auth::{self, LoginRequest, LoginResponse, verify_token, create_token, TOKEN_EXPIRY_SECS};
+use crate::auth::{self, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, verify_token, create_token, TOKEN_EXPIRY_SECS};
 use crate::types::{
     CreateRunRequest, CreateRunResponse, ChatRequest, ChatResponse,
     ErrorResponse, AgentConfig,
@@ -47,6 +47,20 @@ pub async fn login(
         refresh_token: None,
         user,
     }))
+}
+
+/// POST /api/auth/register
+pub async fn register(
+    Json(req): Json<RegisterRequest>,
+) -> Result<Json<RegisterResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let user = auth::register_user(&req.username, &req.password)
+        .map_err(|e| {
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+                error: e,
+            }))
+        })?;
+
+    Ok(Json(RegisterResponse { user }))
 }
 
 // ============ Health Handlers ============
@@ -131,6 +145,7 @@ pub async fn create_run(
         agent_type: req.metadata.agent_type.unwrap_or_else(|| "mock".to_string()),
         working_dir: req.metadata.cwd,
         model: req.metadata.model,
+        env: req.metadata.env.unwrap_or_default(),
         ..Default::default()
     };
 

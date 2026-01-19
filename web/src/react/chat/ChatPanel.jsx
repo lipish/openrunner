@@ -1,21 +1,87 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { ArrowUp, ChevronDown, GitPullRequestCreate, Hash, Image as ImageIcon, ListChecks, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, ChevronsUpDown, Hash, Image as ImageIcon, ListChecks, Settings, X } from 'lucide-react';
 import { sendMessage } from '../../lib/agentApi.js';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog.jsx';
 
 function now() {
   return new Date();
 }
 
-const MODELS = ['Gemini-2.5-Pro', 'GPT-4.1', 'Claude Sonnet 4.5'];
+const AGENTS = [
+  { id: 'claude_code', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'droid', label: 'Droid' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'kimi_cli', label: 'Kimi-Cli' },
+  { id: 'augment', label: 'Augment' },
+  { id: 'amp', label: 'AMP' },
+  { id: 'mock', label: 'Mock' },
+];
 
-function loadModel() {
-  return localStorage.getItem('run-agent.model') || MODELS[0];
+function agentLabel(id) {
+  return AGENTS.find((a) => a.id === id)?.label || id || 'Agent';
+}
+
+function envToText(env) {
+  if (!env || typeof env !== 'object') return '';
+  return Object.entries(env)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n');
+}
+
+function textToEnv(text) {
+  const env = {};
+  String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const idx = line.indexOf('=');
+      if (idx <= 0) return;
+      const k = line.slice(0, idx).trim();
+      const v = line.slice(idx + 1).trim();
+      if (k) env[k] = v;
+    });
+  return env;
 }
 
 export default function ChatPanel({ session, onSessionChange, showHeader = true }) {
   const [input, setInput] = useState('');
-  const [model, setModel] = useState(loadModel());
   const [attachments, setAttachments] = useState([]);
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [agentQuery, setAgentQuery] = useState('');
+  const agentPickerRef = useRef(null);
+  const agentSearchRef = useRef(null);
+
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
+  const [modelDraft, setModelDraft] = useState(session?.model || '');
+  const [envDraft, setEnvDraft] = useState(envToText(session?.env));
+
+  const agentType = session?.agent_type || 'claude_code';
+  const model = session?.model || undefined;
+  const env = session?.env || undefined;
+
+  useEffect(() => {
+    if (!agentPickerOpen) return;
+
+    // wait for the popover to render
+    setTimeout(() => agentSearchRef.current?.focus(), 0);
+
+    const onMouseDown = (e) => {
+      if (!agentPickerRef.current) return;
+      if (agentPickerRef.current.contains(e.target)) return;
+      setAgentPickerOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setAgentPickerOpen(false);
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [agentPickerOpen]);
 
   const listRef = useRef(null);
   const textareaRef = useRef(null);
@@ -54,7 +120,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
 
     const attachmentMeta = attachments.map((f) => ({ name: f.name, type: f.type, size: f.size }));
 
-    const user = { id: `${Date.now()}_u`, role: 'user', content: text, attachments: attachmentMeta, model, timestamp: now() };
+    const user = { id: `${Date.now()}_u`, role: 'user', content: text, attachments: attachmentMeta, model, agent_type: agentType, timestamp: now() };
     const assistantId = `${Date.now()}_a`;
     const assistant = { id: assistantId, role: 'assistant', content: '', status: 'running', timestamp: now() };
 
@@ -75,7 +141,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
     };
 
     try {
-      const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, attachments: attachmentMeta });
+      const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, agentType: agentType, env, attachments: attachmentMeta });
       onSessionChange((s) => ({
         ...s,
         messages: s.messages.map((m) =>
@@ -94,8 +160,75 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
 
   const canSend = useMemo(() => input.trim().length > 0 || attachments.length > 0, [input, attachments.length]);
 
+  const filteredAgents = useMemo(() => {
+    const q = agentQuery.trim().toLowerCase();
+    if (!q) return AGENTS;
+    return AGENTS.filter((a) => a.label.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
+  }, [agentQuery]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Dialog
+        open={agentSettingsOpen}
+        onOpenChange={(v) => {
+          setAgentSettingsOpen(v);
+          if (v) {
+            setModelDraft(session?.model || '');
+            setEnvDraft(envToText(session?.env));
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agent Settings</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Model (optional)</div>
+                <input
+                  value={modelDraft}
+                  onChange={(e) => setModelDraft(e.target.value)}
+                  placeholder="e.g. glm-4.7 / gpt-4.1 / claude-sonnet"
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 14 }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Environment variables (KEY=VALUE per line)</div>
+                <textarea
+                  value={envDraft}
+                  onChange={(e) => setEnvDraft(e.target.value)}
+                  rows={8}
+                  spellCheck={false}
+                  placeholder="ANTHROPIC_BASE_URL=https://...\nANTHROPIC_API_KEY=..."
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+                />
+              </div>
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setAgentSettingsOpen(false)}
+              style={{ height: 34, padding: '0 12px', borderRadius: 10, border: '1px solid #D1D5DB', background: '#fff', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const nextModel = modelDraft.trim();
+                const nextEnv = textToEnv(envDraft);
+                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv }));
+                setAgentSettingsOpen(false);
+              }}
+              style={{ height: 34, padding: '0 12px', borderRadius: 10, border: 'none', background: '#007AFF', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+            >
+              Save
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {showHeader ? (
         <div style={{ padding: '12px 14px', borderBottom: '1px solid #E5E5EA', background: '#FAFAFA', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{session?.title || 'Agent'}</div>
@@ -221,28 +354,80 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <div style={{ marginRight: 8, height: 32, display: 'flex', alignItems: 'center', gap: 6, background: '#F8F9FA', padding: '4px 8px', borderRadius: 8, cursor: 'pointer' }}>
-                <select
-                  value={model}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setModel(v);
-                    localStorage.setItem('run-agent.model', v);
-                  }}
-                  style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 12, color: '#3C4043', cursor: 'pointer' }}
-                >
-                  {MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={16} style={{ transform: 'translateY(1px)', color: '#5F6368' }} />
-              </div>
+              <div style={{ marginRight: 8, height: 32, display: 'flex', alignItems: 'center', gap: 6, background: '#F8F9FA', padding: '4px 8px', borderRadius: 8 }}>
+                <div style={{ position: 'relative' }} ref={agentPickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAgentPickerOpen((v) => !v);
+                      setAgentQuery('');
+                    }}
+                    title="Select agent"
+                    style={{ height: 28, border: 'none', outline: 'none', background: 'transparent', fontSize: 12, color: '#3C4043', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 2px' }}
+                  >
+                    <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agentLabel(agentType)}</span>
+                    <ChevronsUpDown size={16} style={{ color: '#5F6368' }} />
+                  </button>
 
-              <button title="添加任务" style={{ width: 32, height: 32, border: 'none', borderRadius: 8, background: '#F8F9FA', color: '#5F6368', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
-                <GitPullRequestCreate size={16} />
-              </button>
+                  {agentPickerOpen ? (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        bottom: 'calc(100% + 8px)',
+                        width: 260,
+                        background: '#fff',
+                        border: '1px solid #E5E5EA',
+                        borderRadius: 12,
+                        boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
+                        padding: 8,
+                        zIndex: 200,
+                      }}
+                    >
+                      <input
+                        ref={agentSearchRef}
+                        value={agentQuery}
+                        onChange={(e) => setAgentQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && agentQuery.trim() && filteredAgents.length > 0) {
+                            e.preventDefault();
+                            const a = filteredAgents[0];
+                            onSessionChange((s) => ({ ...s, agent_type: a.id }));
+                            setAgentPickerOpen(false);
+                          }
+                        }}
+                        placeholder="Search agent…"
+                        style={{ width: '100%', padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13 }}
+                      />
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 240, overflow: 'auto' }}>
+                        {filteredAgents.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            className={`ra-agent-item${a.id === agentType ? ' is-selected' : ''}`}
+                            onClick={() => {
+                              onSessionChange((s) => ({ ...s, agent_type: a.id }));
+                              setAgentPickerOpen(false);
+                            }}
+                          >
+                            <span>{a.label}</span>
+                            <span className="ra-agent-item-hint">{a.id}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setAgentSettingsOpen(true)}
+                  title="Agent settings"
+                  style={{ width: 28, height: 28, border: 'none', borderRadius: 8, background: 'transparent', color: '#5F6368', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                >
+                  <Settings size={16} />
+                </button>
+              </div>
 
               <button
                 onClick={onSend}

@@ -22,6 +22,10 @@ pub fn create_agent(config: &AgentConfig) -> Result<Box<dyn Agent>> {
         "codex" => Ok(Box::new(CodexAgent::new(config.clone()))),
         "opencode" => Ok(Box::new(OpenCodeAgent::new(config.clone()))),
         "mock" => Ok(Box::new(MockAgent::new(config.clone()))),
+
+        // UI-supported agents (placeholders for now)
+        "droid" | "kimi_cli" | "augment" | "amp" => Ok(Box::new(MockAgent::new(config.clone()))),
+
         _ => anyhow::bail!("Unknown agent type: {}", config.agent_type),
     }
 }

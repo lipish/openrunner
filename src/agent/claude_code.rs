@@ -47,6 +47,11 @@ impl Agent for ClaudeCodeAgent {
             cmd.current_dir(dir);
             cmd.arg("--add-dir").arg(dir);
         }
+
+        // 环境变量
+        for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
         
         // 额外参数（如 --model, --output-format 等）
         for arg in &self.config.extra_args {

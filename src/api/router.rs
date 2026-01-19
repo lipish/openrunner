@@ -51,6 +51,7 @@ pub fn create_router_with_state(state: AppState) -> Router {
         
         // Auth API
         .route("/api/auth/login", post(handlers::login))
+        .route("/api/auth/register", post(handlers::register))
         
         // Runs API
         .route("/api/runs", post(handlers::create_run))

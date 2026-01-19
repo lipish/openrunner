@@ -53,6 +53,11 @@ impl Agent for CodexAgent {
             cmd.arg("-C").arg(dir);
         }
 
+        // 环境变量
+        for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
+
         // 额外参数（用户可通过 extra_args 传入如 --model 等）
         for arg in &self.config.extra_args {
             cmd.arg(arg);

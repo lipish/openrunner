@@ -55,6 +55,11 @@ impl Agent for OpenCodeAgent {
         if let Some(ref dir) = self.config.working_dir {
             cmd.current_dir(dir);
         }
+
+        // 环境变量
+        for (k, v) in &self.config.env {
+            cmd.env(k, v);
+        }
         
         // 禁用 TTY，强制非交互
         cmd.env("TERM", "dumb");

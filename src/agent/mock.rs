@@ -33,12 +33,14 @@ impl Agent for MockAgent {
         // 生成模拟回复
         let response = format!(
             "收到你的消息: \"{}\"\n\n\
+            当前选择的 agent_type: {}\n\n\
             这是 Mock Agent 的模拟回复。在生产环境中，这里会调用真实的 AI Agent（如 Claude Code、Codex 等）。\n\n\
             Mock Agent 功能：\n\
             - 无需 API key\n\
             - 用于前后端联调测试\n\
             - 模拟流式输出",
-            if prompt.len() > 50 { format!("{}...", &prompt[..50]) } else { prompt }
+            if prompt.len() > 50 { format!("{}...", &prompt[..50]) } else { prompt },
+            self.config.agent_type
         );
 
         // 模拟流式输出（每个 chunk 间隔 50ms）

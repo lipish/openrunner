@@ -13,6 +13,6 @@ Open `http://localhost:5173`.
 
 ## Configure backend
 
-- In UI: Settings → set **Backend API Base URL** (e.g. `http://127.0.0.1:8080`).
+- In UI: Settings → set **Backend API Base URL** (e.g. `http://127.0.0.1:8090`).
 - Login API: `POST /api/auth/login` → `{ "access_token": "..." }`.
 - Runs API (recommended): `POST /api/runs` + `GET /api/runs/:id/events` (SSE).

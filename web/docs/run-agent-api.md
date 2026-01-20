@@ -8,7 +8,7 @@ See also:
 
 ## Base
 
-- Default dev base URL: `http://127.0.0.1:8080`
+- Default dev base URL: `http://127.0.0.1:8090`
 - Frontend calls `/api/*` on the configured API base URL.
 
 ## Auth

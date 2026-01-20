@@ -45,7 +45,79 @@ function textToEnv(text) {
   return env;
 }
 
-export default function ChatPanel({ session, onSessionChange, showHeader = true }) {
+function argsToText(args) {
+  return Array.isArray(args) ? args.join('\n') : '';
+}
+
+function textToArgs(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+function agentHints(agentType) {
+  switch (agentType) {
+    case 'kimi_cli':
+      return {
+        modelPlaceholder: 'e.g. kimi-k2 / kimi-k2-thinking',
+        envPlaceholder: `KIMI_API_KEY=sk-...
+KIMI_BASE_URL=https://api.kimi.com/coding/v1`,
+        envHelp: 'Kimi CLI uses ~/.kimi/config.toml by default; you can override via --config-file.',
+        argsPlaceholder: `--config-file
+/path/to/kimi.toml`,
+        argsHelp: 'Use this to point to a config file created from the UI.',
+      };
+    case 'codex':
+      return {
+        modelPlaceholder: 'e.g. gpt-4.1 / o4-mini',
+        envPlaceholder: `OPENAI_API_KEY=sk-...
+OPENAI_BASE_URL=https://api.openai.com/v1`,
+        envHelp: 'OpenAI-compatible endpoints can be set via BASE_URL.',
+        argsPlaceholder: `--model
+gpt-4.1`,
+        argsHelp: 'Args are appended to the codex CLI command.',
+      };
+    case 'opencode':
+      return {
+        modelPlaceholder: 'e.g. kat-coder-pro-v1',
+        envPlaceholder: `OPENCODE_BASE_URL=https://api.example.com/v1
+OPENCODE_API_KEY=your-api-key
+OPENCODE_PROVIDER=custom`,
+        envHelp: 'Set OPENCODE_BASE_URL, OPENCODE_API_KEY, OPENCODE_PROVIDER for custom providers. Settings are saved as defaults for this agent type.',
+        argsPlaceholder: ``,
+        argsHelp: 'Args are appended to the opencode CLI command.',
+      };
+    case 'claude_code':
+      return {
+        modelPlaceholder: 'e.g. claude-3-7-sonnet',
+        envPlaceholder: `ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_BASE_URL=https://api.anthropic.com`,
+        envHelp: 'Set Anthropic API key and optional base URL.',
+        argsPlaceholder: `--model
+claude-3-7-sonnet`,
+        argsHelp: 'Args are appended to the claude CLI command.',
+      };
+    default:
+      return {
+        modelPlaceholder: 'e.g. model-name',
+        envPlaceholder: `API_KEY=sk-...
+BASE_URL=https://api.example.com`,
+        envHelp: 'Pass provider credentials as needed.',
+        argsPlaceholder: `--config-file
+/path/to/agent.toml`,
+        argsHelp: 'Args are appended to the agent CLI command.',
+      };
+  }
+}
+
+
+
+// Default no-op functions for when props are not provided
+const defaultGetAgentDefault = () => ({ model: '', env: {}, extra_args: [] });
+const defaultSetAgentDefault = async () => {};
+
+export default function ChatPanel({ session, onSessionChange, showHeader = true, getAgentDefault = defaultGetAgentDefault, setAgentDefault = defaultSetAgentDefault }) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
@@ -56,10 +128,37 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false);
   const [modelDraft, setModelDraft] = useState(session?.model || '');
   const [envDraft, setEnvDraft] = useState(envToText(session?.env));
+  const [extraArgsDraft, setExtraArgsDraft] = useState(argsToText(session?.extra_args));
 
   const agentType = session?.agent_type || 'claude_code';
+
+  // Sync draft states when session changes (e.g., switching tabs or loading from server)
+  // If session has empty settings, use defaults for this agent type
+  useEffect(() => {
+    const defaults = getAgentDefault(agentType);
+    const sessionModel = session?.model || '';
+    const sessionEnv = session?.env || {};
+    const sessionArgs = session?.extra_args || [];
+
+    // Use session values if they exist, otherwise use defaults
+    const hasSessionConfig = sessionModel || Object.keys(sessionEnv).length > 0 || sessionArgs.length > 0;
+
+    if (hasSessionConfig) {
+      setModelDraft(sessionModel);
+      setEnvDraft(envToText(sessionEnv));
+      setExtraArgsDraft(argsToText(sessionArgs));
+    } else {
+      // Apply defaults for this agent type
+      setModelDraft(defaults.model || '');
+      setEnvDraft(envToText(defaults.env || {}));
+      setExtraArgsDraft(argsToText(defaults.extra_args || []));
+    }
+  }, [session?.id, session?.model, session?.env, session?.extra_args, agentType, getAgentDefault]);
+
   const model = session?.model || undefined;
   const env = session?.env || undefined;
+  const extraArgs = session?.extra_args || undefined;
+  const hints = agentHints(agentType);
 
   useEffect(() => {
     if (!agentPickerOpen) return;
@@ -141,7 +240,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
     };
 
     try {
-      const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, agentType: agentType, env, attachments: attachmentMeta });
+      const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, agentType: agentType, env, extraArgs, attachments: attachmentMeta });
       onSessionChange((s) => ({
         ...s,
         messages: s.messages.map((m) =>
@@ -175,6 +274,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
           if (v) {
             setModelDraft(session?.model || '');
             setEnvDraft(envToText(session?.env));
+            setExtraArgsDraft(argsToText(session?.extra_args));
           }
         }}
       >
@@ -189,7 +289,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
                 <input
                   value={modelDraft}
                   onChange={(e) => setModelDraft(e.target.value)}
-                  placeholder="e.g. glm-4.7 / gpt-4.1 / claude-sonnet"
+                  placeholder={hints.modelPlaceholder}
                   style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 14 }}
                 />
               </div>
@@ -200,9 +300,22 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
                   onChange={(e) => setEnvDraft(e.target.value)}
                   rows={8}
                   spellCheck={false}
-                  placeholder="ANTHROPIC_BASE_URL=https://...\nANTHROPIC_API_KEY=..."
+                  placeholder={hints.envPlaceholder}
                   style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
                 />
+                <div style={{ marginTop: 6, fontSize: 11, color: '#8E8E93' }}>{hints.envHelp}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Extra CLI args (one per line)</div>
+                <textarea
+                  value={extraArgsDraft}
+                  onChange={(e) => setExtraArgsDraft(e.target.value)}
+                  rows={5}
+                  spellCheck={false}
+                  placeholder={hints.argsPlaceholder}
+                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+                />
+                <div style={{ marginTop: 6, fontSize: 11, color: '#8E8E93' }}>{hints.argsHelp}</div>
               </div>
             </div>
           </DialogBody>
@@ -219,7 +332,12 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
               onClick={() => {
                 const nextModel = modelDraft.trim();
                 const nextEnv = textToEnv(envDraft);
-                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv }));
+                const nextArgs = textToArgs(extraArgsDraft);
+                // Save to current session
+                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv, extra_args: nextArgs }));
+                // Also save as default for this agent type
+                setAgentDefault(agentType, { model: nextModel || '', env: nextEnv, extra_args: nextArgs });
+                console.log(`[AgentSettings] Saved defaults for ${agentType}:`, { model: nextModel, env: nextEnv, extra_args: nextArgs });
                 setAgentSettingsOpen(false);
               }}
               style={{ height: 34, padding: '0 12px', borderRadius: 10, border: 'none', background: '#007AFF', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
@@ -392,7 +510,14 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
                           if (e.key === 'Enter' && agentQuery.trim() && filteredAgents.length > 0) {
                             e.preventDefault();
                             const a = filteredAgents[0];
-                            onSessionChange((s) => ({ ...s, agent_type: a.id }));
+                            const defaults = getAgentDefault(a.id);
+                            onSessionChange((s) => ({
+                              ...s,
+                              agent_type: a.id,
+                              model: defaults.model || '',
+                              env: defaults.env || {},
+                              extra_args: defaults.extra_args || []
+                            }));
                             setAgentPickerOpen(false);
                           }
                         }}
@@ -406,7 +531,15 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true 
                             type="button"
                             className={`ra-agent-item${a.id === agentType ? ' is-selected' : ''}`}
                             onClick={() => {
-                              onSessionChange((s) => ({ ...s, agent_type: a.id }));
+                              const defaults = getAgentDefault(a.id);
+                              console.log(`[AgentPicker] Switching to ${a.id}, defaults:`, defaults);
+                              onSessionChange((s) => ({
+                                ...s,
+                                agent_type: a.id,
+                                model: defaults.model || '',
+                                env: defaults.env || {},
+                                extra_args: defaults.extra_args || []
+                              }));
                               setAgentPickerOpen(false);
                             }}
                           >

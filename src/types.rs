@@ -139,6 +139,8 @@ pub struct SessionPayload {
     #[serde(default)]
     pub hidden: bool,
     #[serde(default)]
+    pub position: i32,
+    #[serde(default)]
     pub messages: Vec<SessionMessage>,
 }
 
@@ -152,6 +154,7 @@ pub struct SessionData {
     pub env: std::collections::HashMap<String, String>,
     pub extra_args: Vec<String>,
     pub hidden: bool,
+    pub position: i32,
     pub created_at: String,
     pub updated_at: String,
     pub messages: Vec<SessionMessage>,

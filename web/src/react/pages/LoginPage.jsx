@@ -22,11 +22,7 @@ export default function LoginPage() {
     if (isRegisterMode) {
       // 注册模式
       if (!username.trim()) {
-        setError('请输入邮箱');
-        return;
-      }
-      if (!/^\S+@\S+\.\S+$/.test(username.trim())) {
-        setError('请输入有效的邮箱');
+        setError('请输入用户名或邮箱');
         return;
       }
       if (!password) {
@@ -66,11 +62,7 @@ export default function LoginPage() {
     } else {
       // 登录模式
       if (!username.trim()) {
-        setError('请输入邮箱');
-        return;
-      }
-      if (!/^\S+@\S+\.\S+$/.test(username.trim())) {
-        setError('请输入有效的邮箱');
+        setError('请输入用户名或邮箱');
         return;
       }
       setLoading(true);
@@ -128,13 +120,13 @@ export default function LoginPage() {
         <h1 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>OpenRunner {isRegisterMode ? '注册' : '登录'}</h1>
       </div>
       <form onSubmit={onSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label style={{ fontSize: 13, color: '#666' }}>邮箱</label>
+        <label style={{ fontSize: 13, color: '#666' }}>{isRegisterMode ? '邮箱' : '用户名或邮箱'}</label>
         <input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="name@example.com"
-          autoComplete="email"
-          inputMode="email"
+          placeholder={isRegisterMode ? 'name@example.com' : 'admin'}
+          autoComplete={isRegisterMode ? 'email' : 'username'}
+          inputMode={isRegisterMode ? 'email' : 'text'}
           required
           style={{ padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 14 }}
         />

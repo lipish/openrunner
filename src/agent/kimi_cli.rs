@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use anyhow::Result;
+use tracing::info;
 use crate::types::{AgentConfig, StreamEvent};
 use super::Agent;
 
@@ -37,28 +39,43 @@ impl Agent for KimiCliAgent {
     async fn run(&self, prompt: String, tx: mpsc::Sender<StreamEvent>) -> Result<()> {
         let mut cmd = tokio::process::Command::new("kimi");
 
-        // 非交互模式：使用 --prompt/-p 直接传入 prompt
-        cmd.arg("--prompt").arg(&prompt);
+        let mut args: Vec<String> = Vec::new();
 
-        // 选择模型（可选）
         if let Some(ref model) = self.config.model {
-            cmd.arg("--model").arg(model);
+            args.push("--model".to_string());
+            args.push(model.to_string());
         }
 
-        // 工作目录
         if let Some(ref dir) = self.config.working_dir {
-            cmd.arg("--work-dir").arg(dir);
+            args.push("--work-dir".to_string());
+            args.push(dir.to_string());
             cmd.current_dir(dir);
         }
 
-        // 环境变量
-        for (k, v) in &self.config.env {
-            cmd.env(k, v);
+        args.extend(self.config.extra_args.iter().cloned());
+        args.push("--print".to_string());
+        args.push("--command".to_string());
+        args.push(prompt.clone());
+
+        let mut redacted = args.clone();
+        for item in &mut redacted {
+            let lower = item.to_lowercase();
+            if lower.contains("api_key") || lower.contains("sk-") {
+                *item = "[redacted]".to_string();
+            }
+            if item == &prompt {
+                *item = "<prompt>".to_string();
+            }
+        }
+        let env_keys: Vec<&String> = self.config.env.keys().collect();
+        info!("kimi args: {:?}, env keys: {:?}", redacted, env_keys);
+
+        for arg in &args {
+            cmd.arg(arg);
         }
 
-        // 额外参数（如 --agent, --config-file 等）
-        for arg in &self.config.extra_args {
-            cmd.arg(arg);
+        for (k, v) in &self.config.env {
+            cmd.env(k, v);
         }
 
         cmd.stdout(std::process::Stdio::piped());
@@ -66,9 +83,14 @@ impl Agent for KimiCliAgent {
 
         let mut child = cmd.spawn()?;
         let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
+        let mut stderr_handle = child.stderr.take();
         let mut reader = BufReader::new(stdout).lines();
+        let mut last_output: Option<String> = None;
 
         while let Some(line) = reader.next_line().await? {
+            if !line.trim().is_empty() {
+                last_output = Some(line.clone());
+            }
             if tx.send(StreamEvent::Token { content: format!("{}\n", line) }).await.is_err() {
                 child.kill().await?;
                 break;
@@ -77,7 +99,17 @@ impl Agent for KimiCliAgent {
 
         let status = child.wait().await?;
         if !status.success() {
-            anyhow::bail!("kimi exited with status: {}", status);
+            let mut stderr = String::new();
+            if let Some(mut err) = stderr_handle.take() {
+                let _ = err.read_to_string(&mut stderr).await;
+            }
+            if stderr.trim().is_empty() {
+                if let Some(line) = last_output {
+                    anyhow::bail!("kimi failed: {}", line.trim());
+                }
+                anyhow::bail!("kimi exited with status: {}", status);
+            }
+            anyhow::bail!("kimi failed: {}", stderr.trim());
         }
 
         Ok(())

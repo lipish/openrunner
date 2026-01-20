@@ -44,6 +44,31 @@ export async function fetchSessions() {
   return data.sessions || [];
 }
 
+export async function fetchAgentDefaults() {
+  const res = await fetch(apiUrl('/api/agent-defaults'), {
+    method: 'GET',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return data.defaults || {};
+}
+
+export async function saveAgentDefault(agentType, config) {
+  const res = await fetch(apiUrl('/api/agent-defaults'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({
+      agent_type: agentType,
+      model: config.model || null,
+      env: config.env || {},
+      extra_args: config.extra_args || [],
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
 export async function saveSessions(sessions) {
   const res = await fetch(apiUrl('/api/sessions'), {
     method: 'POST',
@@ -67,14 +92,16 @@ export async function chatOnce(message, opts = {}) {
 
 export async function createRun(message, sessionId, opts = {}) {
   const { model, attachments, agentType, env, extraArgs } = opts;
+  const payload = {
+    input: { text: message, attachments },
+    session_id: sessionId || null,
+    metadata: { client: 'web', model, agent_type: agentType, env, extra_args: extraArgs }
+  };
+  console.log('[createRun] Sending payload:', JSON.stringify(payload, null, 2));
   const res = await fetch(apiUrl('/api/runs'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({
-      input: { text: message, attachments },
-      session_id: sessionId || null,
-      metadata: { client: 'web', model, agent_type: agentType, env, extra_args: extraArgs }
-    })
+    body: JSON.stringify(payload)
   });
 
   if (!res.ok) {
@@ -95,7 +122,7 @@ export function streamRun(runId, { onDelta, onCompleted, onError }) {
     try {
       const data = JSON.parse(raw);
       if (data?.delta) onDelta?.(data.delta);
-      if (data?.message?.content) onCompleted?.(data.message);
+      if (data?.message) onCompleted?.(data.message);
       if (data?.error) onError?.(new Error(data.error));
     } catch {
       if (raw) onDelta?.(raw);

@@ -1,9 +1,9 @@
-import React, { useEffect, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ChevronDown, LogOut, Plus, Settings, Trash2, User } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ChatPanel from '../chat/ChatPanel.jsx';
 import SettingsModal from './SettingsModal.jsx';
-import { fetchSessions, saveSessions } from '../../lib/agentApi.js';
+import { fetchSessions, saveSessions, fetchAgentDefaults, saveAgentDefault as saveAgentDefaultApi } from '../../lib/agentApi.js';
 
 const AGENT_LABELS = {
   claude_code: 'Claude Code',
@@ -78,33 +78,81 @@ export default function Shell() {
   }));
   const persistTimeout = useRef(null);
 
+  // Agent defaults - shared across all ChatPanels
+  const [agentDefaults, setAgentDefaults] = useState({});
+
   const sessions = agentState.sessions;
   const hiddenSessions = agentState.hiddenSessions;
+
+  const getAgentDefault = useCallback((agentType) => {
+    return agentDefaults[agentType] || { model: '', env: {}, extra_args: [] };
+  }, [agentDefaults]);
+
+  const setAgentDefault = useCallback(async (agentType, config) => {
+    try {
+      await saveAgentDefaultApi(agentType, config);
+      setAgentDefaults((prev) => ({ ...prev, [agentType]: config }));
+      console.log(`[Shell] Saved defaults for ${agentType}:`, config);
+    } catch (e) {
+      console.error('[Shell] Failed to save defaults:', e);
+    }
+  }, []);
+
+  // Helper to apply defaults to sessions that have no config
+  const applyDefaultsToSessions = useCallback((sessionList, defaults) => {
+    return sessionList.map((s) => {
+      const agentDefault = defaults[s.agent_type];
+      if (!agentDefault) return s;
+
+      // Check if session has any config
+      const hasConfig = s.model || (s.env && Object.keys(s.env).length > 0) || (s.extra_args && s.extra_args.length > 0);
+      if (hasConfig) return s;
+
+      // Apply defaults
+      return {
+        ...s,
+        model: agentDefault.model || '',
+        env: agentDefault.env || {},
+        extra_args: agentDefault.extra_args || [],
+      };
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
     if (!token) {
       dispatch({ type: 'REPLACE_ALL', sessions: [newSession(), newSession(), newSession()], hiddenSessions: [] });
+      setAgentDefaults({});
       return () => {
         active = false;
       };
     }
-    fetchSessions()
-      .then((loaded) => {
+    // Load sessions and agent defaults in parallel
+    Promise.all([fetchSessions(), fetchAgentDefaults()])
+      .then(([loaded, defaults]) => {
         if (!active) return;
         const visible = loaded.filter((s) => !s.hidden);
         const hidden = loaded.filter((s) => s.hidden);
+
+        // Apply defaults to sessions that have no config
+        const visibleWithDefaults = applyDefaultsToSessions(visible.length ? visible : [newSession()], defaults);
+        const hiddenWithDefaults = applyDefaultsToSessions(hidden, defaults);
+
         dispatch({
           type: 'REPLACE_ALL',
-          sessions: visible.length ? visible : [newSession()],
-          hiddenSessions: hidden,
+          sessions: visibleWithDefaults,
+          hiddenSessions: hiddenWithDefaults,
         });
+        setAgentDefaults(defaults);
+        console.log('[Shell] Loaded agent defaults:', defaults);
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.error('[Shell] Failed to load:', e);
+      });
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, applyDefaultsToSessions]);
 
   useEffect(() => {
     if (persistTimeout.current) clearTimeout(persistTimeout.current);
@@ -277,7 +325,13 @@ export default function Shell() {
             </div>
 
             <div style={{ flex: 1, minHeight: 0 }}>
-              <ChatPanel session={s} onSessionChange={(updater) => updateSession(s.id, updater)} showHeader={false} />
+              <ChatPanel
+                session={s}
+                onSessionChange={(updater) => updateSession(s.id, updater)}
+                showHeader={false}
+                getAgentDefault={getAgentDefault}
+                setAgentDefault={setAgentDefault}
+              />
             </div>
           </div>
         ))}

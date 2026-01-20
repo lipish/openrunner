@@ -47,7 +47,7 @@ export OPENAI_API_KEY="sk-xxx"
 ## 启动服务
 
 ```bash
-# 默认端口 8080
+# 默认端口 8090
 cargo run --release
 
 # 自定义端口
@@ -58,10 +58,10 @@ OPENRUNNER_ADDR=0.0.0.0:3000 cargo run --release
 
 ```bash
 # 健康检查
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 
 # 检查 Agent 可用性
-curl http://localhost:8080/health/agents
+curl http://localhost:8090/health/agents
 ```
 
 ## 基本使用
@@ -69,7 +69,7 @@ curl http://localhost:8080/health/agents
 ### 1. 登录获取 Token
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:8090/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "admin"}'
 ```
@@ -89,7 +89,7 @@ curl -X POST http://localhost:8080/api/auth/login \
 ```bash
 export TOKEN="eyJ..."
 
-curl -X POST http://localhost:8080/api/runs \
+curl -X POST http://localhost:8090/api/runs \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
@@ -106,7 +106,7 @@ curl -X POST http://localhost:8080/api/runs \
 ### 3. 订阅事件流
 
 ```bash
-curl -N "http://localhost:8080/api/runs/run_abc123def456/events?access_token=$TOKEN"
+curl -N "http://localhost:8090/api/runs/run_abc123def456/events?access_token=$TOKEN"
 ```
 
 SSE 输出：
@@ -124,7 +124,7 @@ data: {"message": {"role": "assistant", "content": "...", "timestamp": "2026-01-
 ### 4. 非流式调用（可选）
 
 ```bash
-curl -X POST http://localhost:8080/api/chat \
+curl -X POST http://localhost:8090/api/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"message": "explain what is rust"}'

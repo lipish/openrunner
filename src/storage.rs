@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::Utc;
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{sqlite::{SqlitePoolOptions, SqliteConnectOptions}, SqlitePool};
 
 use crate::types::{Attachment, SessionData, SessionMessage};
 
@@ -16,6 +16,7 @@ struct SessionRow {
     env_json: Option<String>,
     extra_args_json: Option<String>,
     hidden: i64,
+    position: i64,
     created_at: String,
     updated_at: String,
 }
@@ -47,10 +48,12 @@ impl Db {
         if let Some(parent) = Path::new(path).parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let url = format!("sqlite://{}", path);
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(&url)
+            .connect_with(options)
             .await?;
         let db = Self { pool };
         db.init().await?;
@@ -73,6 +76,7 @@ impl Db {
                 env_json TEXT,
                 extra_args_json TEXT,
                 hidden INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -80,6 +84,11 @@ impl Db {
         )
         .execute(&self.pool)
         .await?;
+
+        // Add position column if not exists (for existing databases)
+        let _ = sqlx::query("ALTER TABLE sessions ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+            .execute(&self.pool)
+            .await;
 
         sqlx::query(
             r#"
@@ -105,6 +114,23 @@ impl Db {
             .execute(&self.pool)
             .await?;
 
+        // Agent defaults table - stores per-user, per-agent-type default configurations
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS agent_defaults (
+                user_id TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                model TEXT,
+                env_json TEXT,
+                extra_args_json TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, agent_type)
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -118,10 +144,11 @@ impl Db {
         env: Option<HashMap<String, String>>,
         extra_args: Option<Vec<String>>,
         hidden: Option<bool>,
+        position: Option<i32>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let row = sqlx::query_as::<_, SessionRow>(
-            r#"SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, created_at, updated_at
+            r#"SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, position, created_at, updated_at
                FROM sessions WHERE id = ? AND user_id = ?"#,
         )
         .bind(session_id)
@@ -147,14 +174,15 @@ impl Db {
         let next_env = env.or_else(|| row.as_ref().and_then(|r| parse_env(&r.env_json)));
         let next_args = extra_args.or_else(|| row.as_ref().and_then(|r| parse_args(&r.extra_args_json)));
         let next_hidden = hidden.unwrap_or_else(|| row.as_ref().map(|r| r.hidden != 0).unwrap_or(false));
+        let next_position = position.unwrap_or_else(|| row.as_ref().map(|r| r.position as i32).unwrap_or(0));
 
         let env_json = serde_json::to_string(&next_env.unwrap_or_default())?;
         let extra_args_json = serde_json::to_string(&next_args.unwrap_or_default())?;
 
         sqlx::query(
             r#"
-            INSERT INTO sessions (id, user_id, title, agent_type, model, env_json, extra_args_json, hidden, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sessions (id, user_id, title, agent_type, model, env_json, extra_args_json, hidden, position, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 agent_type = excluded.agent_type,
@@ -162,6 +190,7 @@ impl Db {
                 env_json = excluded.env_json,
                 extra_args_json = excluded.extra_args_json,
                 hidden = excluded.hidden,
+                position = excluded.position,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -173,6 +202,7 @@ impl Db {
         .bind(env_json)
         .bind(extra_args_json)
         .bind(if next_hidden { 1 } else { 0 })
+        .bind(next_position)
         .bind(created_at)
         .bind(now)
         .execute(&self.pool)
@@ -219,10 +249,10 @@ impl Db {
     pub async fn list_sessions(&self, user_id: &str) -> Result<Vec<SessionData>> {
         let sessions = sqlx::query_as::<_, SessionRow>(
             r#"
-            SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, created_at, updated_at
+            SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, position, created_at, updated_at
             FROM sessions
             WHERE user_id = ?
-            ORDER BY updated_at DESC
+            ORDER BY position ASC, created_at ASC
             "#,
         )
         .bind(user_id)
@@ -240,6 +270,7 @@ impl Db {
                 env: parse_env(&s.env_json).unwrap_or_default(),
                 extra_args: parse_args(&s.extra_args_json).unwrap_or_default(),
                 hidden: s.hidden != 0,
+                position: s.position as i32,
                 created_at: s.created_at,
                 updated_at: s.updated_at,
                 messages,
@@ -320,4 +351,87 @@ fn parse_attachments(value: &Option<String>) -> Option<Vec<Attachment>> {
     value
         .as_ref()
         .and_then(|v| serde_json::from_str(v).ok())
+}
+
+// ============ Agent Defaults ============
+
+#[derive(Debug, sqlx::FromRow)]
+struct AgentDefaultRow {
+    agent_type: String,
+    model: Option<String>,
+    env_json: Option<String>,
+    extra_args_json: Option<String>,
+}
+
+/// Agent default configuration
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AgentDefault {
+    pub agent_type: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+}
+
+impl Db {
+    pub async fn get_agent_defaults(&self, user_id: &str) -> Result<Vec<AgentDefault>> {
+        let rows = sqlx::query_as::<_, AgentDefaultRow>(
+            r#"
+            SELECT agent_type, model, env_json, extra_args_json
+            FROM agent_defaults
+            WHERE user_id = ?
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut result = Vec::new();
+        for r in rows {
+            result.push(AgentDefault {
+                agent_type: r.agent_type,
+                model: r.model,
+                env: parse_env(&r.env_json).unwrap_or_default(),
+                extra_args: parse_args(&r.extra_args_json).unwrap_or_default(),
+            });
+        }
+        Ok(result)
+    }
+
+    pub async fn set_agent_default(
+        &self,
+        user_id: &str,
+        agent_type: &str,
+        model: Option<String>,
+        env: HashMap<String, String>,
+        extra_args: Vec<String>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let env_json = serde_json::to_string(&env)?;
+        let extra_args_json = serde_json::to_string(&extra_args)?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_defaults (user_id, agent_type, model, env_json, extra_args_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, agent_type) DO UPDATE SET
+                model = excluded.model,
+                env_json = excluded.env_json,
+                extra_args_json = excluded.extra_args_json,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(user_id)
+        .bind(agent_type)
+        .bind(model)
+        .bind(env_json)
+        .bind(extra_args_json)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }

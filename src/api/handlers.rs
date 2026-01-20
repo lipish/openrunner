@@ -139,24 +139,33 @@ pub async fn create_run(
     let user_id = auth_user_from_headers(&headers)
         .unwrap_or_else(|_| "anonymous".to_string());
 
+    let (agent_type, model, env, extra_args) = normalize_run_metadata(&req);
+
+    // Debug: log received metadata
+    tracing::info!(
+        "create_run - agent_type: {:?}, model: {:?}, env_keys: {:?}, extra_args: {:?}",
+        agent_type,
+        model,
+        env.as_ref().map(|e| e.keys().collect::<Vec<_>>()),
+        extra_args
+    );
     let run_id = state.run_manager.create_run(
-        user_id,
-        req.session_id,
+        &user_id,
+        req.session_id.clone(),
         &req.input.text,
     );
 
     // 构建 AgentConfig (默认使用 mock agent 便于测试)
     let config = AgentConfig {
-        agent_type: req.metadata.agent_type.unwrap_or_else(|| "mock".to_string()),
-        working_dir: req.metadata.cwd,
-        model: req.metadata.model,
-        env: req.metadata.env.unwrap_or_default(),
-        extra_args: req.metadata.extra_args.unwrap_or_default(),
+        agent_type: agent_type.clone().unwrap_or_else(|| "mock".to_string()),
+        working_dir: req.metadata.cwd.clone(),
+        model: model.clone(),
+        env: env.clone().unwrap_or_default(),
+        extra_args: extra_args.clone().unwrap_or_default(),
         ..Default::default()
     };
 
     if let Some(session_id) = req.session_id.as_ref() {
-        let (agent_type, model, env, extra_args) = normalize_run_metadata(&req);
         let _ = state.db.upsert_session(
             &user_id,
             session_id,
@@ -165,6 +174,7 @@ pub async fn create_run(
             model,
             env,
             extra_args,
+            None,
             None,
         ).await;
     }
@@ -214,7 +224,7 @@ pub async fn save_sessions(
         }
     }
 
-    for s in &req.sessions {
+    for (idx, s) in req.sessions.iter().enumerate() {
         state.db.upsert_session(
             &user_id,
             &s.id,
@@ -224,12 +234,65 @@ pub async fn save_sessions(
             Some(s.env.clone()),
             Some(s.extra_args.clone()),
             Some(s.hidden),
+            Some(idx as i32),
         ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
 
         for m in &s.messages {
             let _ = state.db.insert_message(&user_id, &s.id, m).await;
         }
     }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ============ Agent Defaults ============
+
+/// GET /api/agent-defaults - 获取所有 agent 类型的默认配置
+pub async fn get_agent_defaults(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = auth_user_from_headers(&headers)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "invalid_token".to_string() })))?;
+
+    let defaults = state.db.get_agent_defaults(&user_id).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
+
+    // Convert to a map keyed by agent_type
+    let mut map = std::collections::HashMap::new();
+    for d in defaults {
+        map.insert(d.agent_type.clone(), serde_json::json!({
+            "model": d.model,
+            "env": d.env,
+            "extra_args": d.extra_args,
+        }));
+    }
+
+    Ok(Json(serde_json::json!({ "defaults": map })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetAgentDefaultRequest {
+    pub agent_type: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+}
+
+/// POST /api/agent-defaults - 设置某个 agent 类型的默认配置
+pub async fn set_agent_default(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<SetAgentDefaultRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = auth_user_from_headers(&headers)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "invalid_token".to_string() })))?;
+
+    state.db.set_agent_default(&user_id, &req.agent_type, req.model, req.env, req.extra_args).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -303,6 +366,34 @@ pub async fn run_events(
                 error: format!("Run not found: {}", run_id),
             }))
         })?;
+
+    // 订阅后再次检查状态，避免完成事件在订阅前就丢失
+    let latest = state.run_manager.get_run(&run_id)
+        .ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(ErrorResponse {
+                error: format!("Run not found: {}", run_id),
+            }))
+        })?;
+    if latest.status == RunStatus::Completed {
+        let events = vec![RunEvent::RunCompleted(RunCompleted {
+            message: CompletedMessage {
+                role: "assistant".to_string(),
+                content: latest.output.clone(),
+                timestamp: latest.updated_at,
+            },
+        })];
+        let stream: std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>> =
+            Box::pin(futures::stream::iter(events).map(run_event_to_sse));
+        return Ok(Sse::new(stream));
+    }
+    if latest.status == RunStatus::Failed {
+        let events = vec![RunEvent::RunFailed(RunFailed {
+            error: latest.error.unwrap_or_else(|| "Unknown error".to_string()),
+        })];
+        let stream: std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>> =
+            Box::pin(futures::stream::iter(events).map(run_event_to_sse));
+        return Ok(Sse::new(stream));
+    }
 
     // 转换为 SSE 流
     let stream: std::pin::Pin<Box<dyn futures::stream::Stream<Item = Result<Event, Infallible>> + Send>> = 

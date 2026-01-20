@@ -62,7 +62,11 @@ pub fn create_router_with_state(state: AppState) -> Router {
         // Sessions API
         .route("/api/sessions", get(handlers::list_sessions))
         .route("/api/sessions", post(handlers::save_sessions))
-        
+
+        // Agent Defaults API
+        .route("/api/agent-defaults", get(handlers::get_agent_defaults))
+        .route("/api/agent-defaults", post(handlers::set_agent_default))
+
         // 状态
         .with_state(state)
         

@@ -56,24 +56,24 @@ cargo build --release
 cargo run
 
 # 指定端口
-OPENRUNNER_ADDR=0.0.0.0:8080 cargo run
+OPENRUNNER_ADDR=0.0.0.0:8090 cargo run
 ```
 
 ## API 接口
 
 ### 健康检查
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 ```
 
 ### 检查 Agent 可用性
 ```bash
-curl http://localhost:8080/health/agents
+curl http://localhost:8090/health/agents
 ```
 
 ### 登录获取 Token
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:8090/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "admin"}'
 ```
@@ -83,7 +83,7 @@ curl -X POST http://localhost:8080/api/auth/login \
 ### 创建 Run（流式）
 ```bash
 # 1. 创建 run
-curl -X POST http://localhost:8080/api/runs \
+curl -X POST http://localhost:8090/api/runs \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{
@@ -94,12 +94,12 @@ curl -X POST http://localhost:8080/api/runs \
 # 返回: {"run_id": "run_abc123"}
 
 # 2. 订阅事件流 (SSE)
-curl -N "http://localhost:8080/api/runs/run_abc123/events?access_token=<token>"
+curl -N "http://localhost:8090/api/runs/run_abc123/events?access_token=<token>"
 ```
 
 ### 非流式聊天（降级方案）
 ```bash
-curl -X POST http://localhost:8080/api/chat \
+curl -X POST http://localhost:8090/api/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{"message": "hello", "model": "claude"}'

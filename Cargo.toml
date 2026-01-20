@@ -47,6 +47,7 @@ dashmap = "6"
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "macros"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

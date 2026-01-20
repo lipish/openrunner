@@ -13,10 +13,10 @@ async fn main() -> Result<()> {
         .init();
 
     // 创建路由
-    let app = openrunner::create_router();
+    let app = openrunner::create_router().await;
 
     // 绑定地址
-    let addr = std::env::var("OPENRUNNER_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+    let addr = std::env::var("OPENRUNNER_ADDR").unwrap_or_else(|_| "0.0.0.0:8090".to_string());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("OpenRunner listening on {}", addr);

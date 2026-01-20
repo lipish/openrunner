@@ -3,6 +3,7 @@ import { ChevronDown, LogOut, Plus, Settings, Trash2, User } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx';
 import ChatPanel from '../chat/ChatPanel.jsx';
 import SettingsModal from './SettingsModal.jsx';
+import { fetchSessions, saveSessions } from '../../lib/agentApi.js';
 
 const AGENT_LABELS = {
   claude_code: 'Claude Code',
@@ -21,11 +22,14 @@ function agentLabel(id) {
 
 function newSession() {
   const id = `s_${Math.random().toString(16).slice(2)}`;
-  return { id, title: 'New Agent', messages: [], agent_type: 'claude_code', model: '', env: {} };
+  return { id, title: 'New Agent', messages: [], agent_type: 'claude_code', model: '', env: {}, extra_args: [] };
 }
 
 function agentReducer(state, action) {
   switch (action.type) {
+    case 'REPLACE_ALL': {
+      return { ...state, sessions: action.sessions, hiddenSessions: action.hiddenSessions };
+    }
     case 'ADD': {
       return { ...state, sessions: [newSession(), ...state.sessions] };
     }
@@ -64,7 +68,7 @@ function agentReducer(state, action) {
 }
 
 export default function Shell() {
-  const { logout } = useAuth();
+  const { logout, token } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef(null);
@@ -72,9 +76,50 @@ export default function Shell() {
     sessions: [newSession(), newSession(), newSession()],
     hiddenSessions: [],
   }));
+  const persistTimeout = useRef(null);
 
   const sessions = agentState.sessions;
   const hiddenSessions = agentState.hiddenSessions;
+
+  useEffect(() => {
+    let active = true;
+    if (!token) {
+      dispatch({ type: 'REPLACE_ALL', sessions: [newSession(), newSession(), newSession()], hiddenSessions: [] });
+      return () => {
+        active = false;
+      };
+    }
+    fetchSessions()
+      .then((loaded) => {
+        if (!active) return;
+        const visible = loaded.filter((s) => !s.hidden);
+        const hidden = loaded.filter((s) => s.hidden);
+        dispatch({
+          type: 'REPLACE_ALL',
+          sessions: visible.length ? visible : [newSession()],
+          hiddenSessions: hidden,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (persistTimeout.current) clearTimeout(persistTimeout.current);
+    if (!token) return;
+    persistTimeout.current = setTimeout(() => {
+      const payload = [
+        ...sessions.map((s) => ({ ...s, hidden: false })),
+        ...hiddenSessions.map((s) => ({ ...s, hidden: true })),
+      ];
+      saveSessions(payload).catch(() => {});
+    }, 400);
+    return () => {
+      if (persistTimeout.current) clearTimeout(persistTimeout.current);
+    };
+  }, [sessions, hiddenSessions]);
 
   useEffect(() => {
     if (!userMenuOpen) return;

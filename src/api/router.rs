@@ -6,31 +6,30 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::run::{RunStore, RunManager};
+use crate::storage::Db;
 use super::handlers;
 
 /// 应用状态
 #[derive(Clone)]
 pub struct AppState {
     pub run_manager: RunManager,
+    pub db: Db,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let store = RunStore::new();
         let run_manager = RunManager::new(store);
-        Self { run_manager }
-    }
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self::new()
+        let db = Db::new("data/openrunner.db")
+            .await
+            .expect("Failed to initialize database");
+        Self { run_manager, db }
     }
 }
 
 /// 创建 API 路由
-pub fn create_router() -> Router {
-    let state = AppState::new();
+pub async fn create_router() -> Router {
+    let state = AppState::new().await;
     create_router_with_state(state)
 }
 
@@ -59,6 +58,10 @@ pub fn create_router_with_state(state: AppState) -> Router {
         
         // Chat API (fallback)
         .route("/api/chat", post(handlers::chat))
+
+        // Sessions API
+        .route("/api/sessions", get(handlers::list_sessions))
+        .route("/api/sessions", post(handlers::save_sessions))
         
         // 状态
         .with_state(state)

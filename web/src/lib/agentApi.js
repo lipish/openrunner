@@ -34,26 +34,46 @@ export async function loginWithPassword({ username, password }) {
   };
 }
 
+export async function fetchSessions() {
+  const res = await fetch(apiUrl('/api/sessions'), {
+    method: 'GET',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return data.sessions || [];
+}
+
+export async function saveSessions(sessions) {
+  const res = await fetch(apiUrl('/api/sessions'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ sessions }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
 export async function chatOnce(message, opts = {}) {
-  const { model, attachments, agentType, env } = opts;
+  const { model, attachments, agentType, env, extraArgs } = opts;
   const res = await fetch(apiUrl('/api/chat'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ message, model, attachments, agent_type: agentType, env })
+    body: JSON.stringify({ message, model, attachments, agent_type: agentType, env, extra_args: extraArgs })
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.json();
 }
 
 export async function createRun(message, sessionId, opts = {}) {
-  const { model, attachments, agentType, env } = opts;
+  const { model, attachments, agentType, env, extraArgs } = opts;
   const res = await fetch(apiUrl('/api/runs'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
       input: { text: message, attachments },
       session_id: sessionId || null,
-      metadata: { client: 'web', model, agent_type: agentType, env }
+      metadata: { client: 'web', model, agent_type: agentType, env, extra_args: extraArgs }
     })
   });
 
@@ -95,8 +115,8 @@ export function streamRun(runId, { onDelta, onCompleted, onError }) {
   return () => es.close();
 }
 
-export async function sendMessage({ message, sessionId, onDelta, model, attachments, agentType, env }) {
-  const opts = { model, attachments, agentType, env };
+export async function sendMessage({ message, sessionId, onDelta, model, attachments, agentType, env, extraArgs }) {
+  const opts = { model, attachments, agentType, env, extraArgs };
 
   try {
     const { run_id } = await createRun(message, sessionId, opts);

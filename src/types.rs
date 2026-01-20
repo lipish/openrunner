@@ -92,6 +92,8 @@ pub struct RunMetadata {
     pub agent_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_args: Option<Vec<String>>,
 }
 
 /// POST /api/runs 请求
@@ -102,6 +104,62 @@ pub struct CreateRunRequest {
     pub session_id: Option<String>,
     #[serde(default)]
     pub metadata: RunMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionMessage {
+    pub id: String,
+    pub role: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub agent_type: Option<String>,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionPayload {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub messages: Vec<SessionMessage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionData {
+    pub id: String,
+    pub title: String,
+    pub agent_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub env: std::collections::HashMap<String, String>,
+    pub extra_args: Vec<String>,
+    pub hidden: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub messages: Vec<SessionMessage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionsResponse {
+    pub sessions: Vec<SessionData>,
 }
 
 /// POST /api/runs 响应
@@ -120,6 +178,8 @@ pub struct ChatRequest {
     pub agent_type: Option<String>,
     #[serde(default)]
     pub env: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub extra_args: Option<Vec<String>>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
 }

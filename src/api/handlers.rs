@@ -11,14 +11,18 @@ use tokio_stream::wrappers::ReceiverStream;
 use std::convert::Infallible;
 use serde::Deserialize;
 
-use crate::auth::{self, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, verify_token, create_token, TOKEN_EXPIRY_SECS};
+use crate::auth::{self, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, verify_token, create_token, TOKEN_EXPIRY_SECS, AuthError};
 use crate::types::{
     CreateRunRequest, CreateRunResponse, ChatRequest, ChatResponse,
-    ErrorResponse, AgentConfig,
+    ErrorResponse, AgentConfig, SessionPayload, SessionsResponse,
 };
 use crate::agent::{create_agent, AgentHandle, ClaudeCodeAgent, CodexAgent, OpenCodeAgent, MockAgent, Agent};
 
 use super::AppState;
+
+fn normalize_run_metadata(req: &CreateRunRequest) -> (Option<String>, Option<String>, Option<std::collections::HashMap<String, String>>, Option<Vec<String>>) {
+    (req.metadata.agent_type.clone(), req.metadata.model.clone(), req.metadata.env.clone(), req.metadata.extra_args.clone())
+}
 
 // ============ Auth Handlers ============
 
@@ -129,10 +133,11 @@ pub async fn list_agents() -> impl IntoResponse {
 /// POST /api/runs - 创建 Run
 pub async fn create_run(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<CreateRunRequest>,
 ) -> Result<Json<CreateRunResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // TODO: 从 Authorization header 获取 user_id
-    let user_id = "anonymous";
+    let user_id = auth_user_from_headers(&headers)
+        .unwrap_or_else(|_| "anonymous".to_string());
 
     let run_id = state.run_manager.create_run(
         user_id,
@@ -146,8 +151,23 @@ pub async fn create_run(
         working_dir: req.metadata.cwd,
         model: req.metadata.model,
         env: req.metadata.env.unwrap_or_default(),
+        extra_args: req.metadata.extra_args.unwrap_or_default(),
         ..Default::default()
     };
+
+    if let Some(session_id) = req.session_id.as_ref() {
+        let (agent_type, model, env, extra_args) = normalize_run_metadata(&req);
+        let _ = state.db.upsert_session(
+            &user_id,
+            session_id,
+            None,
+            agent_type,
+            model,
+            env,
+            extra_args,
+            None,
+        ).await;
+    }
 
     // 启动 Run
     if let Err(e) = state.run_manager.start_run(&run_id, config).await {
@@ -157,6 +177,61 @@ pub async fn create_run(
     }
 
     Ok(Json(CreateRunResponse { run_id }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SessionsRequest {
+    pub sessions: Vec<SessionPayload>,
+}
+
+/// GET /api/sessions - 获取用户的 sessions
+pub async fn list_sessions(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<SessionsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = auth_user_from_headers(&headers)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "invalid_token".to_string() })))?;
+    let sessions = state.db.list_sessions(&user_id).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
+    Ok(Json(SessionsResponse { sessions }))
+}
+
+/// POST /api/sessions - 批量保存 sessions
+pub async fn save_sessions(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<SessionsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = auth_user_from_headers(&headers)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: "invalid_token".to_string() })))?;
+
+    let existing_ids = state.db.list_session_ids(&user_id).await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
+    let incoming_ids: std::collections::HashSet<String> = req.sessions.iter().map(|s| s.id.clone()).collect();
+    for id in existing_ids {
+        if !incoming_ids.contains(&id) {
+            let _ = state.db.delete_session(&user_id, &id).await;
+        }
+    }
+
+    for s in &req.sessions {
+        state.db.upsert_session(
+            &user_id,
+            &s.id,
+            Some(s.title.clone()),
+            Some(s.agent_type.clone()),
+            s.model.clone(),
+            Some(s.env.clone()),
+            Some(s.extra_args.clone()),
+            Some(s.hidden),
+        ).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
+
+        for m in &s.messages {
+            let _ = state.db.insert_message(&user_id, &s.id, m).await;
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// SSE query params
@@ -247,6 +322,7 @@ pub async fn chat(
         agent_type: req.agent_type.unwrap_or_else(|| "claude_code".to_string()),
         model: req.model,
         env: req.env.unwrap_or_default(),
+        extra_args: req.extra_args.unwrap_or_default(),
         ..Default::default()
     };
 
@@ -289,3 +365,19 @@ pub async fn chat(
 
 // 需要引入 StreamExt
 use futures::StreamExt;
+fn get_user_id_from_token(token: &str) -> Result<String, AuthError> {
+    let claims = verify_token(token)?;
+    Ok(claims.sub)
+}
+
+fn auth_user_from_headers(headers: &axum::http::HeaderMap) -> Result<String, AuthError> {
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let token = auth.strip_prefix("Bearer ").unwrap_or("");
+    if token.is_empty() {
+        return Err(AuthError::MissingToken);
+    }
+    get_user_id_from_token(token)
+}

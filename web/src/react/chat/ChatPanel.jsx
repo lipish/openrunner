@@ -2,6 +2,20 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ChevronsUpDown, Hash, Image as ImageIcon, ListChecks, Settings, X } from 'lucide-react';
 import { sendMessage } from '../../lib/agentApi.js';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog.jsx';
+import { Select, SelectOption } from '../components/ui/select.jsx';
+import { Input, Textarea } from '../components/ui/input.jsx';
+import { Button } from '../components/ui/button.jsx';
+import { Label, Hint, Warning } from '../components/ui/label.jsx';
+
+// Generate a random project name
+function generateRandomProjectName() {
+  const adjectives = ['quick', 'bright', 'calm', 'swift', 'bold', 'cool', 'sharp', 'smart'];
+  const nouns = ['fox', 'wolf', 'hawk', 'bear', 'lion', 'tiger', 'eagle', 'falcon'];
+  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  const num = Math.floor(Math.random() * 1000);
+  return `${adj}-${noun}-${num}`;
+}
 
 function now() {
   return new Date();
@@ -255,7 +269,20 @@ export default function ChatPanel({
     };
 
     try {
-      const projectId = session?.project_id || null;
+      // Auto-create project if not set
+      let projectId = session?.project_id || null;
+      if (!projectId && onCreateProject) {
+        const randomName = generateRandomProjectName();
+        console.log(`[ChatPanel] Auto-creating project: ${randomName}`);
+        try {
+          const newProject = await onCreateProject(randomName);
+          projectId = newProject.id;
+          // Update session with the new project
+          onSessionChange((s) => ({ ...s, project_id: projectId, _autoCreatedProject: randomName }));
+        } catch (e) {
+          console.error('Failed to auto-create project:', e);
+        }
+      }
       const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, agentType: agentType, env, extraArgs, attachments: attachmentMeta, projectId });
       onSessionChange((s) => ({
         ...s,
@@ -301,32 +328,26 @@ export default function ChatPanel({
             <DialogTitle>Agent Settings</DialogTitle>
           </DialogHeader>
           <DialogBody>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Project (Codebase)</div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <select
-                    value={projectDraft}
-                    onChange={(e) => setProjectDraft(e.target.value)}
-                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 14, background: '#fff' }}
-                  >
-                    <option value="">-- No Project --</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <Label>Project (Codebase)</Label>
+                <Select value={projectDraft} onChange={(e) => setProjectDraft(e.target.value)}>
+                  <SelectOption value="">-- No Project (auto-create) --</SelectOption>
+                  {projects.map((p) => (
+                    <SelectOption key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectOption>
+                  ))}
+                </Select>
                 <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input
+                  <Input
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
                     placeholder="New project name..."
-                    style={{ flex: 1, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 8, fontSize: 13 }}
+                    style={{ flex: 1, padding: '8px 10px', fontSize: 13 }}
                   />
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
                     disabled={!newProjectName.trim() || creatingProject}
                     onClick={async () => {
                       if (!newProjectName.trim()) return;
@@ -341,74 +362,70 @@ export default function ChatPanel({
                         setCreatingProject(false);
                       }
                     }}
-                    style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: newProjectName.trim() ? '#007AFF' : '#ccc', color: '#fff', fontSize: 13, cursor: newProjectName.trim() ? 'pointer' : 'not-allowed' }}
                   >
                     {creatingProject ? '...' : 'Create'}
-                  </button>
+                  </Button>
                 </div>
-                <div style={{ marginTop: 6, fontSize: 11, color: '#8E8E93' }}>Select or create a project. Agent will run in the project directory.</div>
+                {!projectDraft && (
+                  <Warning>No project selected. A random project will be created when you send a message.</Warning>
+                )}
+                {session?._autoCreatedProject && (
+                  <Warning>Auto-created project "{session._autoCreatedProject}". You can rename it in Settings.</Warning>
+                )}
+                <Hint>Agent will run in the project directory. Select or create a project for your codebase.</Hint>
               </div>
               <div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Model (optional)</div>
-                <input
+                <Label>Model (optional)</Label>
+                <Input
                   value={modelDraft}
                   onChange={(e) => setModelDraft(e.target.value)}
                   placeholder={hints.modelPlaceholder}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 14 }}
                 />
               </div>
               <div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Environment variables (KEY=VALUE per line)</div>
-                <textarea
+                <Label>Environment variables (KEY=VALUE per line)</Label>
+                <Textarea
                   value={envDraft}
                   onChange={(e) => setEnvDraft(e.target.value)}
                   rows={6}
                   spellCheck={false}
                   placeholder={hints.envPlaceholder}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
                 />
-                <div style={{ marginTop: 6, fontSize: 11, color: '#8E8E93' }}>{hints.envHelp}</div>
+                <Hint>{hints.envHelp}</Hint>
               </div>
               <div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Extra CLI args (one per line)</div>
-                <textarea
+                <Label>Extra CLI args (one per line)</Label>
+                <Textarea
                   value={extraArgsDraft}
                   onChange={(e) => setExtraArgsDraft(e.target.value)}
                   rows={4}
                   spellCheck={false}
                   placeholder={hints.argsPlaceholder}
-                  style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
                 />
-                <div style={{ marginTop: 6, fontSize: 11, color: '#8E8E93' }}>{hints.argsHelp}</div>
+                <Hint>{hints.argsHelp}</Hint>
               </div>
             </div>
           </DialogBody>
           <DialogFooter>
-            <button
-              type="button"
-              onClick={() => setAgentSettingsOpen(false)}
-              style={{ height: 34, padding: '0 12px', borderRadius: 10, border: '1px solid #D1D5DB', background: '#fff', cursor: 'pointer' }}
-            >
+            <Button variant="outline" onClick={() => setAgentSettingsOpen(false)}>
               Cancel
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               onClick={() => {
                 const nextModel = modelDraft.trim();
                 const nextEnv = textToEnv(envDraft);
                 const nextArgs = textToArgs(extraArgsDraft);
                 const nextProjectId = projectDraft || null;
                 // Save to current session
-                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv, extra_args: nextArgs, project_id: nextProjectId }));
+                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv, extra_args: nextArgs, project_id: nextProjectId, _autoCreatedProject: null }));
                 // Also save as default for this agent type
                 setAgentDefault(agentType, { model: nextModel || '', env: nextEnv, extra_args: nextArgs });
                 console.log(`[AgentSettings] Saved settings for ${agentType}:`, { model: nextModel, env: nextEnv, extra_args: nextArgs, project_id: nextProjectId });
                 setAgentSettingsOpen(false);
               }}
-              style={{ height: 34, padding: '0 12px', borderRadius: 10, border: 'none', background: '#007AFF', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
             >
               Save
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -39,6 +39,12 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Process execution for CLI agents
 async-process = "2"
 
+# HTTP client for LLM APIs
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Gateway dependencies
+rand = "0.8"
+
 # JWT authentication
 jsonwebtoken = "9"
 
@@ -49,6 +55,7 @@ dashmap = "6"
 chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "macros"] }
 shell-escape = "0.1.5"
+once_cell = "1.21.3"
 
 [dev-dependencies]
 tokio-test = "0.4"

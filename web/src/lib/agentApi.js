@@ -91,11 +91,11 @@ export async function chatOnce(message, opts = {}) {
 }
 
 export async function createRun(message, sessionId, opts = {}) {
-  const { model, attachments, agentType, env, extraArgs } = opts;
+  const { model, attachments, agentType, env, extraArgs, projectId } = opts;
   const payload = {
     input: { text: message, attachments },
     session_id: sessionId || null,
-    metadata: { client: 'web', model, agent_type: agentType, env, extra_args: extraArgs }
+    metadata: { client: 'web', model, agent_type: agentType, env, extra_args: extraArgs, project_id: projectId }
   };
   console.log('[createRun] Sending payload:', JSON.stringify(payload, null, 2));
   const res = await fetch(apiUrl('/api/runs'), {
@@ -142,8 +142,8 @@ export function streamRun(runId, { onDelta, onCompleted, onError }) {
   return () => es.close();
 }
 
-export async function sendMessage({ message, sessionId, onDelta, model, attachments, agentType, env, extraArgs }) {
-  const opts = { model, attachments, agentType, env, extraArgs };
+export async function sendMessage({ message, sessionId, onDelta, model, attachments, agentType, env, extraArgs, projectId }) {
+  const opts = { model, attachments, agentType, env, extraArgs, projectId };
 
   try {
     const { run_id } = await createRun(message, sessionId, opts);
@@ -167,4 +167,37 @@ export async function sendMessage({ message, sessionId, onDelta, model, attachme
     }
     throw e;
   }
+}
+
+// ============ Projects API ============
+
+export async function fetchProjects() {
+  const res = await fetch(apiUrl('/api/projects'), {
+    method: 'GET',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+export async function createProject(name) {
+  const res = await fetch(apiUrl('/api/projects'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function deleteProject(projectId) {
+  const res = await fetch(apiUrl(`/api/projects/${encodeURIComponent(projectId)}`), {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json', ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
 }

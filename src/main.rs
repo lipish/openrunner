@@ -12,6 +12,9 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    // 初始化 LLM Gateway providers
+    openrunner::agent::init_default_providers();
+
     // 创建路由
     let app = openrunner::create_router().await;
 
@@ -30,6 +33,16 @@ async fn main() -> Result<()> {
     tracing::info!("  POST /api/runs            - Create a run");
     tracing::info!("  GET  /api/runs/:id/events - Stream run events (SSE)");
     tracing::info!("  POST /api/chat            - Non-streaming chat (fallback)");
+    tracing::info!("");
+    tracing::info!("OpenRouter-compatible API:");
+    tracing::info!("  POST /v1/chat/completions - Chat completions");
+    tracing::info!("  GET  /v1/models           - List models");
+    tracing::info!("  GET  /v1/models/:id       - Model details");
+    tracing::info!("");
+    tracing::info!("Provider management:");
+    tracing::info!("  GET  /api/providers       - List providers");
+    tracing::info!("  POST /api/providers       - Register provider");
+    tracing::info!("  GET  /api/providers/health-check - Health check providers");
     tracing::info!("");
     tracing::info!("Default users: admin/admin, user/user");
 

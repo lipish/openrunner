@@ -94,6 +94,8 @@ pub struct RunMetadata {
     pub env: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_args: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
 }
 
 /// POST /api/runs 请求
@@ -141,7 +143,25 @@ pub struct SessionPayload {
     #[serde(default)]
     pub position: i32,
     #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
     pub messages: Vec<SessionMessage>,
+}
+
+/// Project represents a codebase directory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Create project request
+#[derive(Debug, Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,6 +175,8 @@ pub struct SessionData {
     pub extra_args: Vec<String>,
     pub hidden: bool,
     pub position: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub messages: Vec<SessionMessage>,

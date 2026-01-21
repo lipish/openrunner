@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// SSE 事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -5,11 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// JWT Claims
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,        // user_id
+    pub sub: String, // user_id
     pub username: String,
     pub roles: Vec<String>,
-    pub exp: u64,           // 过期时间
-    pub iat: u64,           // 签发时间
+    pub exp: u64, // 过期时间
+    pub iat: u64, // 签发时间
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1,8 +1,8 @@
+use super::Agent;
+use crate::types::{AgentConfig, StreamEvent};
+use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
-use anyhow::Result;
-use crate::types::{AgentConfig, StreamEvent};
-use super::Agent;
 
 /// Mock Agent - 用于调试和测试，不需要真实的 API key
 pub struct MockAgent {
@@ -53,9 +53,11 @@ impl Agent for MockAgent {
         }
 
         // 发送完成事件
-        let _ = tx.send(StreamEvent::Done { 
-            session_id: uuid::Uuid::new_v4()
-        }).await;
+        let _ = tx
+            .send(StreamEvent::Done {
+                session_id: uuid::Uuid::new_v4(),
+            })
+            .await;
 
         Ok(())
     }

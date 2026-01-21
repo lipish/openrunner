@@ -3,7 +3,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::Utc;
-use sqlx::{sqlite::{SqlitePoolOptions, SqliteConnectOptions}, SqlitePool};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+    SqlitePool,
+};
 
 use crate::types::{Attachment, SessionData, SessionMessage};
 
@@ -17,6 +20,16 @@ struct SessionRow {
     extra_args_json: Option<String>,
     hidden: i64,
     position: i64,
+    project_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ProjectRow {
+    id: String,
+    name: String,
+    path: String,
     created_at: String,
     updated_at: String,
 }
@@ -131,6 +144,35 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
+        // Projects table - stores user projects with their codebase directories
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, name)
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Add project_id to sessions if not exists
+        let cols: Vec<(String,)> = sqlx::query_as("PRAGMA table_info(sessions)")
+            .fetch_all(&self.pool)
+            .await?;
+        let has_project_id = cols.iter().any(|(name,)| name == "project_id");
+        if !has_project_id {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+                .execute(&self.pool)
+                .await
+                .ok();
+        }
+
         Ok(())
     }
 
@@ -145,10 +187,11 @@ impl Db {
         extra_args: Option<Vec<String>>,
         hidden: Option<bool>,
         position: Option<i32>,
+        project_id: Option<String>,
     ) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         let row = sqlx::query_as::<_, SessionRow>(
-            r#"SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, position, created_at, updated_at
+            r#"SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, position, project_id, created_at, updated_at
                FROM sessions WHERE id = ? AND user_id = ?"#,
         )
         .bind(session_id)
@@ -172,17 +215,22 @@ impl Db {
             .unwrap_or_else(|| "mock".to_string());
         let next_model = model.or_else(|| row.as_ref().and_then(|r| r.model.clone()));
         let next_env = env.or_else(|| row.as_ref().and_then(|r| parse_env(&r.env_json)));
-        let next_args = extra_args.or_else(|| row.as_ref().and_then(|r| parse_args(&r.extra_args_json)));
-        let next_hidden = hidden.unwrap_or_else(|| row.as_ref().map(|r| r.hidden != 0).unwrap_or(false));
-        let next_position = position.unwrap_or_else(|| row.as_ref().map(|r| r.position as i32).unwrap_or(0));
+        let next_args =
+            extra_args.or_else(|| row.as_ref().and_then(|r| parse_args(&r.extra_args_json)));
+        let next_hidden =
+            hidden.unwrap_or_else(|| row.as_ref().map(|r| r.hidden != 0).unwrap_or(false));
+        let next_position =
+            position.unwrap_or_else(|| row.as_ref().map(|r| r.position as i32).unwrap_or(0));
+        let next_project_id =
+            project_id.or_else(|| row.as_ref().and_then(|r| r.project_id.clone()));
 
         let env_json = serde_json::to_string(&next_env.unwrap_or_default())?;
         let extra_args_json = serde_json::to_string(&next_args.unwrap_or_default())?;
 
         sqlx::query(
             r#"
-            INSERT INTO sessions (id, user_id, title, agent_type, model, env_json, extra_args_json, hidden, position, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sessions (id, user_id, title, agent_type, model, env_json, extra_args_json, hidden, position, project_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 agent_type = excluded.agent_type,
@@ -191,6 +239,7 @@ impl Db {
                 extra_args_json = excluded.extra_args_json,
                 hidden = excluded.hidden,
                 position = excluded.position,
+                project_id = excluded.project_id,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -203,6 +252,7 @@ impl Db {
         .bind(extra_args_json)
         .bind(if next_hidden { 1 } else { 0 })
         .bind(next_position)
+        .bind(next_project_id)
         .bind(created_at)
         .bind(now)
         .execute(&self.pool)
@@ -249,7 +299,7 @@ impl Db {
     pub async fn list_sessions(&self, user_id: &str) -> Result<Vec<SessionData>> {
         let sessions = sqlx::query_as::<_, SessionRow>(
             r#"
-            SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, position, created_at, updated_at
+            SELECT id, title, agent_type, model, env_json, extra_args_json, hidden, position, project_id, created_at, updated_at
             FROM sessions
             WHERE user_id = ?
             ORDER BY position ASC, created_at ASC
@@ -271,6 +321,7 @@ impl Db {
                 extra_args: parse_args(&s.extra_args_json).unwrap_or_default(),
                 hidden: s.hidden != 0,
                 position: s.position as i32,
+                project_id: s.project_id,
                 created_at: s.created_at,
                 updated_at: s.updated_at,
                 messages,
@@ -296,10 +347,10 @@ impl Db {
 
     pub async fn delete_session(&self, user_id: &str, session_id: &str) -> Result<()> {
         sqlx::query("DELETE FROM sessions WHERE id = ? AND user_id = ?")
-        .bind(session_id)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
+            .bind(session_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -336,21 +387,15 @@ impl Db {
 }
 
 fn parse_env(value: &Option<String>) -> Option<HashMap<String, String>> {
-    value
-        .as_ref()
-        .and_then(|v| serde_json::from_str(v).ok())
+    value.as_ref().and_then(|v| serde_json::from_str(v).ok())
 }
 
 fn parse_args(value: &Option<String>) -> Option<Vec<String>> {
-    value
-        .as_ref()
-        .and_then(|v| serde_json::from_str(v).ok())
+    value.as_ref().and_then(|v| serde_json::from_str(v).ok())
 }
 
 fn parse_attachments(value: &Option<String>) -> Option<Vec<Attachment>> {
-    value
-        .as_ref()
-        .and_then(|v| serde_json::from_str(v).ok())
+    value.as_ref().and_then(|v| serde_json::from_str(v).ok())
 }
 
 // ============ Agent Defaults ============
@@ -432,6 +477,83 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    // Project methods
+    pub async fn list_projects(&self, user_id: &str) -> Result<Vec<crate::types::Project>> {
+        let rows = sqlx::query_as::<_, ProjectRow>(
+            r#"
+            SELECT id, name, path, created_at, updated_at
+            FROM projects
+            WHERE user_id = ?
+            ORDER BY name ASC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::types::Project {
+                id: r.id,
+                name: r.name,
+                path: r.path,
+                created_at: r.created_at,
+                updated_at: r.updated_at,
+            })
+            .collect())
+    }
+
+    pub async fn get_project(&self, user_id: &str, project_id: &str) -> Result<Option<crate::types::Project>> {
+        let row = sqlx::query_as::<_, ProjectRow>(
+            r#"
+            SELECT id, name, path, created_at, updated_at
+            FROM projects
+            WHERE id = ? AND user_id = ?
+            "#,
+        )
+        .bind(project_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| crate::types::Project {
+            id: r.id,
+            name: r.name,
+            path: r.path,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }))
+    }
+
+    pub async fn create_project(&self, user_id: &str, id: &str, name: &str, path: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            r#"
+            INSERT INTO projects (id, user_id, name, path, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(name)
+        .bind(path)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_project(&self, user_id: &str, project_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM projects WHERE id = ? AND user_id = ?")
+            .bind(project_id)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

@@ -1,11 +1,11 @@
-use async_trait::async_trait;
-use tokio::sync::mpsc;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::io::AsyncReadExt;
-use anyhow::Result;
-use std::path::PathBuf;
-use crate::types::{AgentConfig, StreamEvent};
 use super::Agent;
+use crate::types::{AgentConfig, StreamEvent};
+use anyhow::Result;
+use async_trait::async_trait;
+use std::path::PathBuf;
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
 
 /// OpenCode Agent - 调用 opencode CLI
 /// https://github.com/opencode-ai/opencode
@@ -30,7 +30,11 @@ impl OpenCodeAgent {
     fn build_args(&self, prompt: &str) -> Vec<String> {
         let mut args = vec!["run".to_string(), "--format=json".to_string()];
 
-        let has_model_arg = self.config.extra_args.iter().any(|a| a == "--model" || a == "-m");
+        let has_model_arg = self
+            .config
+            .extra_args
+            .iter()
+            .any(|a| a == "--model" || a == "-m");
 
         // 额外参数（如 --model, --provider 等）
         for arg in &self.config.extra_args {
@@ -61,14 +65,22 @@ impl OpenCodeAgent {
             return Ok(None);
         }
 
-        let base_url = base_url.map(|s| s.as_str()).unwrap_or("https://api.openai.com/v1");
+        let base_url = base_url
+            .map(|s| s.as_str())
+            .unwrap_or("https://api.openai.com/v1");
         let api_key = api_key.map(|s| s.as_str()).unwrap_or("");
-        let provider_name = self.config.env.get("OPENCODE_PROVIDER")
+        let provider_name = self
+            .config
+            .env
+            .get("OPENCODE_PROVIDER")
             .map(|s| s.as_str())
             .unwrap_or("custom");
 
         // 从 model 配置中提取模型名称 (如果已经是 provider/model 格式则提取 model 部分)
-        let model_name = self.config.model.as_ref()
+        let model_name = self
+            .config
+            .model
+            .as_ref()
             .map(|m| {
                 if m.contains('/') {
                     m.split('/').last().unwrap_or(m).to_string()
@@ -154,13 +166,18 @@ impl Agent for OpenCodeAgent {
         let temp_dir = dynamic_config.as_ref().map(|(dir, _)| dir.clone());
 
         // 如果有动态配置，使用配置中的 model 名称
-        let effective_model = dynamic_config.as_ref()
+        let effective_model = dynamic_config
+            .as_ref()
             .map(|(_, model)| model.clone())
             .or_else(|| self.config.model.clone());
 
         // 构建命令行参数
         let mut args = vec!["run".to_string(), "--format=json".to_string()];
-        let has_model_arg = self.config.extra_args.iter().any(|a| a == "--model" || a == "-m");
+        let has_model_arg = self
+            .config
+            .extra_args
+            .iter()
+            .any(|a| a == "--model" || a == "-m");
 
         for arg in &self.config.extra_args {
             args.push(arg.clone());
@@ -175,21 +192,25 @@ impl Agent for OpenCodeAgent {
         args.push(prompt.clone());
 
         // 构建 expect 脚本来提供 PTY
-        let opencode_cmd = format!("opencode {}",
+        let opencode_cmd = format!(
+            "opencode {}",
             args.iter()
                 .map(|a| shell_escape::escape(std::borrow::Cow::Borrowed(a)).to_string())
                 .collect::<Vec<_>>()
                 .join(" ")
         );
 
-        let expect_script = format!(r#"
+        let expect_script = format!(
+            r#"
 set timeout 600
 spawn -noecho {cmd}
 expect {{
     timeout {{ puts "OPENCODE_TIMEOUT"; exit 1 }}
     eof {{ }}
 }}
-"#, cmd = opencode_cmd);
+"#,
+            cmd = opencode_cmd
+        );
 
         let mut cmd = tokio::process::Command::new("expect");
         cmd.arg("-c");
@@ -218,7 +239,10 @@ expect {{
         cmd.stderr(std::process::Stdio::piped());
 
         let mut child = cmd.spawn()?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
         let mut stderr_handle = child.stderr.take();
 
         let mut reader = BufReader::new(stdout).lines();
@@ -235,19 +259,29 @@ expect {{
             // 解析 JSON 事件格式
             if line.starts_with('{') {
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
-                    let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+                    let event_type = event
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("unknown");
                     tracing::debug!("opencode event type: {}", event_type);
 
                     match event_type {
                         "text" => {
                             // 文本输出事件 - opencode 格式: {"type":"text","part":{"text":"..."}}
-                            let text = event.get("part")
+                            let text = event
+                                .get("part")
                                 .and_then(|p| p.get("text"))
                                 .and_then(|t| t.as_str())
                                 .or_else(|| event.get("content").and_then(|c| c.as_str()));
 
                             if let Some(content) = text {
-                                if tx.send(StreamEvent::Token { content: content.to_string() }).await.is_err() {
+                                if tx
+                                    .send(StreamEvent::Token {
+                                        content: content.to_string(),
+                                    })
+                                    .await
+                                    .is_err()
+                                {
                                     let _ = child.kill().await;
                                     break;
                                 }
@@ -255,19 +289,27 @@ expect {{
                         }
                         "error" => {
                             // 错误事件
-                            let error_msg = event.get("error")
+                            let error_msg = event
+                                .get("error")
                                 .and_then(|e| e.get("data"))
                                 .and_then(|d| d.get("message"))
                                 .and_then(|m| m.as_str())
-                                .or_else(|| event.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()))
+                                .or_else(|| {
+                                    event
+                                        .get("error")
+                                        .and_then(|e| e.get("message"))
+                                        .and_then(|m| m.as_str())
+                                })
                                 .or_else(|| event.get("message").and_then(|m| m.as_str()))
                                 .unwrap_or("Unknown error");
                             tracing::error!("opencode error: {}", error_msg);
                             result = Err(anyhow::anyhow!("opencode error: {}", error_msg));
                             // 发送错误消息给前端
-                            let _ = tx.send(StreamEvent::Token {
-                                content: format!("Error: {}", error_msg)
-                            }).await;
+                            let _ = tx
+                                .send(StreamEvent::Token {
+                                    content: format!("Error: {}", error_msg),
+                                })
+                                .await;
                             break;
                         }
                         // 忽略 step_start, step_finish 等内部事件
@@ -286,7 +328,11 @@ expect {{
                 tracing::debug!("opencode non-JSON line: {}", line);
                 // 只发送看起来像错误的内容
                 if line.contains("Error") || line.contains("error") {
-                    let _ = tx.send(StreamEvent::Token { content: format!("{}\n", line) }).await;
+                    let _ = tx
+                        .send(StreamEvent::Token {
+                            content: format!("{}\n", line),
+                        })
+                        .await;
                 }
             }
         }

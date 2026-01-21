@@ -1,6 +1,6 @@
 pub mod jwt;
 
-pub use jwt::{create_token, verify_token, Claims, AuthError, TOKEN_EXPIRY_SECS};
+pub use jwt::{create_token, verify_token, AuthError, Claims, TOKEN_EXPIRY_SECS};
 
 use serde::{Deserialize, Serialize};
 

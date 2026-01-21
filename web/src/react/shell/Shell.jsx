@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { ChevronDown, LogOut, Plus, Settings, Trash2, User } from 'lucide-react';
+import { ChevronDown, FolderOpen, LogOut, Plus, Settings, Trash2, User } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import ChatPanel from '../chat/ChatPanel.jsx';
 import SettingsModal from './SettingsModal.jsx';
-import { fetchSessions, saveSessions, fetchAgentDefaults, saveAgentDefault as saveAgentDefaultApi } from '../../lib/agentApi.js';
+import { fetchSessions, saveSessions, fetchAgentDefaults, saveAgentDefault as saveAgentDefaultApi, fetchProjects, createProject } from '../../lib/agentApi.js';
 
 const AGENT_LABELS = {
   claude_code: 'Claude Code',
@@ -22,7 +22,7 @@ function agentLabel(id) {
 
 function newSession() {
   const id = `s_${Math.random().toString(16).slice(2)}`;
-  return { id, title: 'New Agent', messages: [], agent_type: 'claude_code', model: '', env: {}, extra_args: [] };
+  return { id, title: 'New Agent', messages: [], agent_type: 'claude_code', model: '', env: {}, extra_args: [], project_id: null };
 }
 
 function agentReducer(state, action) {
@@ -81,6 +81,9 @@ export default function Shell() {
   // Agent defaults - shared across all ChatPanels
   const [agentDefaults, setAgentDefaults] = useState({});
 
+  // Projects list
+  const [projects, setProjects] = useState([]);
+
   const sessions = agentState.sessions;
   const hiddenSessions = agentState.hiddenSessions;
 
@@ -118,18 +121,32 @@ export default function Shell() {
     });
   }, []);
 
+  // Create a new project
+  const handleCreateProject = useCallback(async (name) => {
+    try {
+      const result = await createProject(name);
+      setProjects((prev) => [...prev, result.project]);
+      console.log('[Shell] Created project:', result.project);
+      return result.project;
+    } catch (e) {
+      console.error('[Shell] Failed to create project:', e);
+      throw e;
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
     if (!token) {
       dispatch({ type: 'REPLACE_ALL', sessions: [newSession(), newSession(), newSession()], hiddenSessions: [] });
       setAgentDefaults({});
+      setProjects([]);
       return () => {
         active = false;
       };
     }
-    // Load sessions and agent defaults in parallel
-    Promise.all([fetchSessions(), fetchAgentDefaults()])
-      .then(([loaded, defaults]) => {
+    // Load sessions, agent defaults, and projects in parallel
+    Promise.all([fetchSessions(), fetchAgentDefaults(), fetchProjects()])
+      .then(([loaded, defaults, projectsData]) => {
         if (!active) return;
         const visible = loaded.filter((s) => !s.hidden);
         const hidden = loaded.filter((s) => s.hidden);
@@ -144,7 +161,9 @@ export default function Shell() {
           hiddenSessions: hiddenWithDefaults,
         });
         setAgentDefaults(defaults);
+        setProjects(projectsData.projects || []);
         console.log('[Shell] Loaded agent defaults:', defaults);
+        console.log('[Shell] Loaded projects:', projectsData.projects);
       })
       .catch((e) => {
         console.error('[Shell] Failed to load:', e);
@@ -331,6 +350,8 @@ export default function Shell() {
                 showHeader={false}
                 getAgentDefault={getAgentDefault}
                 setAgentDefault={setAgentDefault}
+                projects={projects}
+                onCreateProject={handleCreateProject}
               />
             </div>
           </div>

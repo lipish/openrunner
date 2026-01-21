@@ -116,8 +116,17 @@ BASE_URL=https://api.example.com`,
 // Default no-op functions for when props are not provided
 const defaultGetAgentDefault = () => ({ model: '', env: {}, extra_args: [] });
 const defaultSetAgentDefault = async () => {};
+const defaultOnCreateProject = async () => {};
 
-export default function ChatPanel({ session, onSessionChange, showHeader = true, getAgentDefault = defaultGetAgentDefault, setAgentDefault = defaultSetAgentDefault }) {
+export default function ChatPanel({
+  session,
+  onSessionChange,
+  showHeader = true,
+  getAgentDefault = defaultGetAgentDefault,
+  setAgentDefault = defaultSetAgentDefault,
+  projects = [],
+  onCreateProject = defaultOnCreateProject,
+}) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
@@ -129,6 +138,9 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
   const [modelDraft, setModelDraft] = useState(session?.model || '');
   const [envDraft, setEnvDraft] = useState(envToText(session?.env));
   const [extraArgsDraft, setExtraArgsDraft] = useState(argsToText(session?.extra_args));
+  const [projectDraft, setProjectDraft] = useState(session?.project_id || '');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
 
   const agentType = session?.agent_type || 'claude_code';
 
@@ -153,7 +165,10 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
       setEnvDraft(envToText(defaults.env || {}));
       setExtraArgsDraft(argsToText(defaults.extra_args || []));
     }
-  }, [session?.id, session?.model, session?.env, session?.extra_args, agentType, getAgentDefault]);
+
+    // Sync project
+    setProjectDraft(session?.project_id || '');
+  }, [session?.id, session?.model, session?.env, session?.extra_args, session?.project_id, agentType, getAgentDefault]);
 
   const model = session?.model || undefined;
   const env = session?.env || undefined;
@@ -240,7 +255,8 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
     };
 
     try {
-      const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, agentType: agentType, env, extraArgs, attachments: attachmentMeta });
+      const projectId = session?.project_id || null;
+      const result = await sendMessage({ message: text, sessionId: session.id, onDelta: appendDelta, model, agentType: agentType, env, extraArgs, attachments: attachmentMeta, projectId });
       onSessionChange((s) => ({
         ...s,
         messages: s.messages.map((m) =>
@@ -275,6 +291,8 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
             setModelDraft(session?.model || '');
             setEnvDraft(envToText(session?.env));
             setExtraArgsDraft(argsToText(session?.extra_args));
+            setProjectDraft(session?.project_id || '');
+            setNewProjectName('');
           }
         }}
       >
@@ -284,6 +302,52 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
           </DialogHeader>
           <DialogBody>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Project (Codebase)</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select
+                    value={projectDraft}
+                    onChange={(e) => setProjectDraft(e.target.value)}
+                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 14, background: '#fff' }}
+                  >
+                    <option value="">-- No Project --</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="New project name..."
+                    style={{ flex: 1, padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 8, fontSize: 13 }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!newProjectName.trim() || creatingProject}
+                    onClick={async () => {
+                      if (!newProjectName.trim()) return;
+                      setCreatingProject(true);
+                      try {
+                        const project = await onCreateProject(newProjectName.trim());
+                        setProjectDraft(project.id);
+                        setNewProjectName('');
+                      } catch (e) {
+                        console.error('Failed to create project:', e);
+                      } finally {
+                        setCreatingProject(false);
+                      }
+                    }}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: 'none', background: newProjectName.trim() ? '#007AFF' : '#ccc', color: '#fff', fontSize: 13, cursor: newProjectName.trim() ? 'pointer' : 'not-allowed' }}
+                  >
+                    {creatingProject ? '...' : 'Create'}
+                  </button>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 11, color: '#8E8E93' }}>Select or create a project. Agent will run in the project directory.</div>
+              </div>
               <div>
                 <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Model (optional)</div>
                 <input
@@ -298,7 +362,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
                 <textarea
                   value={envDraft}
                   onChange={(e) => setEnvDraft(e.target.value)}
-                  rows={8}
+                  rows={6}
                   spellCheck={false}
                   placeholder={hints.envPlaceholder}
                   style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
@@ -310,7 +374,7 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
                 <textarea
                   value={extraArgsDraft}
                   onChange={(e) => setExtraArgsDraft(e.target.value)}
-                  rows={5}
+                  rows={4}
                   spellCheck={false}
                   placeholder={hints.argsPlaceholder}
                   style={{ width: '100%', padding: '10px 12px', border: '1px solid #D1D5DB', borderRadius: 10, fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
@@ -333,11 +397,12 @@ export default function ChatPanel({ session, onSessionChange, showHeader = true,
                 const nextModel = modelDraft.trim();
                 const nextEnv = textToEnv(envDraft);
                 const nextArgs = textToArgs(extraArgsDraft);
+                const nextProjectId = projectDraft || null;
                 // Save to current session
-                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv, extra_args: nextArgs }));
+                onSessionChange((s) => ({ ...s, model: nextModel || '', env: nextEnv, extra_args: nextArgs, project_id: nextProjectId }));
                 // Also save as default for this agent type
                 setAgentDefault(agentType, { model: nextModel || '', env: nextEnv, extra_args: nextArgs });
-                console.log(`[AgentSettings] Saved defaults for ${agentType}:`, { model: nextModel, env: nextEnv, extra_args: nextArgs });
+                console.log(`[AgentSettings] Saved settings for ${agentType}:`, { model: nextModel, env: nextEnv, extra_args: nextArgs, project_id: nextProjectId });
                 setAgentSettingsOpen(false);
               }}
               style={{ height: 34, padding: '0 12px', borderRadius: 10, border: 'none', background: '#007AFF', color: '#fff', fontWeight: 700, cursor: 'pointer' }}

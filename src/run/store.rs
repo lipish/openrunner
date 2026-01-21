@@ -1,5 +1,5 @@
-use dashmap::DashMap;
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -47,7 +47,13 @@ impl RunStore {
     }
 
     /// 创建新 Run
-    pub fn create(&self, run_id: String, user_id: String, session_id: Option<String>, input_text: String) -> Run {
+    pub fn create(
+        &self,
+        run_id: String,
+        user_id: String,
+        session_id: Option<String>,
+        input_text: String,
+    ) -> Run {
         let now = Utc::now();
         let run = Run {
             id: run_id.clone(),
@@ -124,11 +130,14 @@ impl RunStore {
     /// 清理过期的 Runs（超过指定时间的已完成/失败 runs）
     pub fn cleanup_expired(&self, max_age_secs: i64) {
         let now = Utc::now();
-        let to_remove: Vec<String> = self.runs
+        let to_remove: Vec<String> = self
+            .runs
             .iter()
             .filter(|r| {
-                matches!(r.status, RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled)
-                    && (now - r.updated_at).num_seconds() > max_age_secs
+                matches!(
+                    r.status,
+                    RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+                ) && (now - r.updated_at).num_seconds() > max_age_secs
             })
             .map(|r| r.id.clone())
             .collect();

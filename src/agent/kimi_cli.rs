@@ -1,11 +1,11 @@
-use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc;
-use anyhow::Result;
-use tracing::info;
-use crate::types::{AgentConfig, StreamEvent};
 use super::Agent;
+use crate::types::{AgentConfig, StreamEvent};
+use anyhow::Result;
+use async_trait::async_trait;
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
+use tracing::info;
 
 /// Kimi CLI Agent - 调用 kimi CLI
 pub struct KimiCliAgent {
@@ -82,7 +82,10 @@ impl Agent for KimiCliAgent {
         cmd.stderr(std::process::Stdio::piped());
 
         let mut child = cmd.spawn()?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
         let mut stderr_handle = child.stderr.take();
         let mut reader = BufReader::new(stdout).lines();
         let mut last_output: Option<String> = None;
@@ -91,7 +94,13 @@ impl Agent for KimiCliAgent {
             if !line.trim().is_empty() {
                 last_output = Some(line.clone());
             }
-            if tx.send(StreamEvent::Token { content: format!("{}\n", line) }).await.is_err() {
+            if tx
+                .send(StreamEvent::Token {
+                    content: format!("{}\n", line),
+                })
+                .await
+                .is_err()
+            {
                 child.kill().await?;
                 break;
             }

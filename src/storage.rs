@@ -162,10 +162,12 @@ impl Db {
         .await?;
 
         // Add project_id to sessions if not exists
-        let cols: Vec<(String,)> = sqlx::query_as("PRAGMA table_info(sessions)")
+        // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+        let cols: Vec<(i32, String, String, i32, Option<String>, i32)> =
+            sqlx::query_as("PRAGMA table_info(sessions)")
             .fetch_all(&self.pool)
             .await?;
-        let has_project_id = cols.iter().any(|(name,)| name == "project_id");
+        let has_project_id = cols.iter().any(|(_, name, _, _, _, _)| name == "project_id");
         if !has_project_id {
             sqlx::query("ALTER TABLE sessions ADD COLUMN project_id TEXT")
                 .execute(&self.pool)
